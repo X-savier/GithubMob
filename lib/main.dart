@@ -4,11 +4,11 @@ import 'login_screen.dart';
 import 'signup_screen.dart'; 
 
 void main() async{
+  WidgetsFlutterBinding.ensureInitialized();
 
   await Supabase.initialize(
-    anonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndidmpzZmd5ZWt6c2Fsc3Z1bXZ5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEzNTM0OTksImV4cCI6MjA4NjkyOTQ5OX0.4aCDLhxzbwyF3m6tMXLNg65Nu3lV0pz1B0ZlBVD1C_I",
-    url: "https://wbvjsfgyekzsalsvumvy.supabase.co",
-
+    anonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1xc2R0Z3Z4eXJ2a29ybm5pZmVuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYyMzM5MDksImV4cCI6MjA5MTgwOTkwOX0.nKTYsvBh9I_64Aa25RluKye79eSIQwBpS8ExWuIiKRc",
+    url: "https://mqsdtgvxyrvkornnifen.supabase.co",
   );
 
   runApp(const MyApp());

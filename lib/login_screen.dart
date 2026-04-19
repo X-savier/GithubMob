@@ -10,339 +10,308 @@ class LoginScreen extends StatefulWidget {
   State<LoginScreen> createState() => _LoginScreenState();
 }
 
-bool _obscurePassword = true;
-
 class _LoginScreenState extends State<LoginScreen> {
-  //get auth service
   final authService = AuthService();
 
-  //text controllers
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
 
-  //login button pressed
-  void login() async{
-    //prepare data
-    final email = _emailController.text;
-    final password = _passwordController.text;
-  
+  bool _obscurePassword = true;
+  bool _isLoading = false;
 
-    //attempt login
-    try {
-      await authService.signInWithEmailPassword(email, password);
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  void login() async {
+    final email = _emailController.text.trim();
+    final password = _passwordController.text;
+
+    if (email.isEmpty || password.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Please fill in all fields")),
+      );
+      return;
     }
 
-    //catch errors
-    catch (e) {
+    setState(() => _isLoading = true);
+
+    try {
+      await authService.signInWithEmailPassword(email, password);
+      await authService.ensureProfile();
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text("Error: $e")));
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (context) => const HomeScreen()),
+        );
       }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Error: $e")),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
-
+  InputDecoration _inputDecoration(
+      String label, String hint, IconData icon) {
+    return InputDecoration(
+      labelText: label,
+      hintText: hint,
+      labelStyle: const TextStyle(color: Colors.white),
+      hintStyle: const TextStyle(color: Colors.white54),
+      prefixIcon: Icon(icon, color: Colors.white70),
+      filled: true,
+      fillColor: Colors.white.withOpacity(0.15),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: BorderSide(color: Colors.white.withOpacity(0.4)),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: const BorderSide(color: Colors.white, width: 2),
+      ),
+      contentPadding: const EdgeInsets.symmetric(vertical: 18, horizontal: 16),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-    resizeToAvoidBottomInset: true,
-    body: Container(
-      width: double.infinity,
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          colors: [Color(0xFFFF7043), Color(0xFFFF8A80)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
+      resizeToAvoidBottomInset: true,
+      body: Container(
+        width: double.infinity,
+        height: double.infinity,
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xFFFF7043), Color(0xFFFF8A80)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
         ),
-      ),
-      child: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            return SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 24,
-                vertical: 20,
-              ),
-              child: ConstrainedBox(
-                constraints: BoxConstraints(
-                  minHeight: constraints.maxHeight,
+        child: SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                /// Back Button
+                IconButton(
+                  icon: const Icon(Icons.arrow_back_ios_new,
+                      color: Colors.white, size: 22),
+                  onPressed: () => Navigator.pop(context),
                 ),
-                child: IntrinsicHeight(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
 
-                      /// Back Button
-                      IconButton(
-                        icon: const Icon(Icons.arrow_back, color: Colors.white),
-                        onPressed: () => Navigator.pop(context),
+                const SizedBox(height: 24),
+
+                /// Logo Row
+                Row(
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(14),
+                      child: Image.asset(
+                        'assets/images/logo.jpg',
+                        width: 44,
+                        height: 44,
+                        fit: BoxFit.cover,
                       ),
+                    ),
+                    const SizedBox(width: 10),
+                    const Text(
+                      "ViewxRent",
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 20,
+                      ),
+                    ),
+                  ],
+                ),
 
-                      const SizedBox(height: 20),
+                const SizedBox(height: 44),
 
-                      /// Logo Row
-                      Row(
-                        children: [
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(15),
-                            child: Image.asset(
-                              'assets/images/logo.jpg',
-                              width: 40,
-                              height: 40,
-                              fit: BoxFit.cover,
+                const Text(
+                  "Welcome Back",
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 28,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  "Sign in to continue",
+                  style: TextStyle(color: Colors.white70, fontSize: 15),
+                ),
+
+                const SizedBox(height: 36),
+
+                /// EMAIL
+                TextField(
+                  controller: _emailController,
+                  keyboardType: TextInputType.emailAddress,
+                  style: const TextStyle(color: Colors.white),
+                  cursorColor: Colors.white,
+                  decoration:
+                      _inputDecoration("Email", "Enter your email", Icons.email_outlined),
+                ),
+
+                const SizedBox(height: 18),
+
+                /// PASSWORD
+                TextField(
+                  controller: _passwordController,
+                  obscureText: _obscurePassword,
+                  style: const TextStyle(color: Colors.white),
+                  cursorColor: Colors.white,
+                  decoration: _inputDecoration(
+                          "Password", "Enter your password", Icons.lock_outline)
+                      .copyWith(
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        _obscurePassword
+                            ? Icons.visibility_off_outlined
+                            : Icons.visibility_outlined,
+                        color: Colors.white70,
+                      ),
+                      onPressed: () {
+                        setState(() => _obscurePassword = !_obscurePassword);
+                      },
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 6),
+
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: () {},
+                    child: const Text(
+                      "Forgot Password?",
+                      style: TextStyle(
+                          color: Colors.white, fontWeight: FontWeight.w500),
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 12),
+
+                /// SIGN IN BUTTON
+                SizedBox(
+                  width: double.infinity,
+                  height: 52,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      foregroundColor: Colors.deepOrange,
+                      elevation: 4,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                    onPressed: _isLoading ? null : login,
+                    child: _isLoading
+                        ? const SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2.5,
+                              color: Colors.deepOrange,
                             ),
+                          )
+                        : const Text(
+                            "Sign In",
+                            style: TextStyle(
+                                fontWeight: FontWeight.bold, fontSize: 16),
                           ),
-                          const SizedBox(width: 8),
-                          const Text(
-                            "ViewxRent",
+                  ),
+                ),
+
+                const SizedBox(height: 28),
+
+                /// OR Divider
+                Row(
+                  children: [
+                    Expanded(
+                        child: Divider(
+                            color: Colors.white.withOpacity(0.5))),
+                    const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 12),
+                      child: Text("OR",
+                          style: TextStyle(
+                              color: Colors.white70,
+                              fontWeight: FontWeight.w500)),
+                    ),
+                    Expanded(
+                        child: Divider(
+                            color: Colors.white.withOpacity(0.5))),
+                  ],
+                ),
+
+                const SizedBox(height: 24),
+
+                /// Google Button
+                SizedBox(
+                  width: double.infinity,
+                  height: 52,
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      side: const BorderSide(color: Colors.white),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                    onPressed: () {},
+                    icon: const Icon(Icons.g_mobiledata, size: 28),
+                    label: const Text("Continue with Google",
+                        style: TextStyle(fontSize: 15)),
+                  ),
+                ),
+
+                const SizedBox(height: 36),
+
+                /// SIGN UP LINK
+                Center(
+                  child: GestureDetector(
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (context) => const SignUpScreen()),
+                      );
+                    },
+                    child: RichText(
+                      text: const TextSpan(
+                        text: "Don't have an account? ",
+                        style: TextStyle(color: Colors.white70),
+                        children: [
+                          TextSpan(
+                            text: "Sign Up",
                             style: TextStyle(
                               color: Colors.white,
                               fontWeight: FontWeight.bold,
-                              fontSize: 18,
+                              decoration: TextDecoration.underline,
                             ),
                           ),
                         ],
                       ),
-
-                      const SizedBox(height: 40),
-
-                      const Text(
-                        "Welcome Back",
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 26,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-
-                      const SizedBox(height: 8),
-
-                      const Text(
-                        "Sign in to continue",
-                        style: TextStyle(color: Colors.white70),
-                      ),
-
-                      const SizedBox(height: 30),
-
-                      /// EMAIL
-                      TextField(
-                        controller: _emailController,
-                        keyboardType: TextInputType.emailAddress,
-                        style: const TextStyle(color: Colors.white),
-                        cursorColor: Colors.white,
-                        decoration: InputDecoration(
-                          labelText: "Email",
-                          hintText: "Enter your email",
-                          labelStyle: const TextStyle(color: Colors.white), 
-                          hintStyle: const TextStyle(color: Colors.white70),
-                          prefixIcon: const Icon(Icons.lock, color: Colors.white),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide:
-                                const BorderSide(color: Colors.white),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide:
-                                const BorderSide(color: Colors.blue, width: 2),
-                          ),
-                          contentPadding:
-                              const EdgeInsets.symmetric(vertical: 16),
-                        ),
-                      ),
-
-                      const SizedBox(height: 15),
-
-                      /// PASSWORD
-                      TextField(
-                        controller: _passwordController,
-                        obscureText: _obscurePassword,
-                        style: const TextStyle(color: Colors.white),
-                        cursorColor: Colors.white,
-                        decoration: InputDecoration(
-                          labelText: "Password",
-                          hintText: "Enter your password",
-                          labelStyle: const TextStyle(color: Colors.white), 
-                          hintStyle: const TextStyle(color: Colors.white70),
-                          prefixIcon: const Icon(Icons.lock, color: Colors.white),
-                          suffixIcon: IconButton(
-                            icon: Icon(
-                              _obscurePassword
-                                  ? Icons.visibility_off
-                                  : Icons.visibility,
-                            ),
-                            onPressed: () {
-                              setState(() {
-                                _obscurePassword = !_obscurePassword;
-                              });
-                            },
-                          ),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide:
-                                const BorderSide(color: Colors.white),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide:
-                                const BorderSide(color: Colors.blue, width: 2),
-                          ),
-                          contentPadding:
-                              const EdgeInsets.symmetric(vertical: 16),
-                        ),
-                      ),
-
-                      const SizedBox(height: 10),
-
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: TextButton(
-                          onPressed: () {},
-                          child: const Text(
-                            "Forgot Password?",
-                            style: TextStyle(color: Colors.white),
-                          ),
-                        ),
-                      ),
-
-                      const SizedBox(height: 10),
-
-                      /// SIGN IN BUTTON
-                      SizedBox(
-                        width: double.infinity,
-                        height: 50,
-                        child: ElevatedButton(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.white,
-                            foregroundColor: Colors.deepOrange,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                          ),
-                          onPressed: () {
-                            Navigator.pushReplacement(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) =>
-                                    const HomeScreen(),
-                              ),
-                            );
-                          },
-                          child: const Text(
-                            "Sign In",
-                            style: TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                        ),
-                      ),
-
-                      const SizedBox(height: 25),
-
-                      Row(
-                        children: const [
-                          Expanded(child: Divider(color: Colors.white)),
-                          Padding(
-                            padding:
-                                EdgeInsets.symmetric(horizontal: 8),
-                            child: Text(
-                              "OR",
-                              style: TextStyle(color: Colors.white),
-                            ),
-                          ),
-                          Expanded(child: Divider(color: Colors.white)),
-                        ],
-                      ),
-
-                      const SizedBox(height: 20),
-
-                      socialButton(
-                          "Continue with Google", Icons.g_mobiledata),
-                      const SizedBox(height: 12),
-                      socialButton(
-                          "Continue with Facebook", Icons.facebook),
-
-                     
-
-                      /// SIGN UP LINK
-                      Center(
-                        child: GestureDetector(
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) =>
-                                    const SignUpScreen(),
-                              ),
-                            );
-                          },
-                          child: const Text(
-                            "Don't have an account? Sign Up",
-                            style:
-                                TextStyle(color: Colors.white),
-                          ),
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
                 ),
-              ),
-            );
-          },
-        ),
-      ),
-    ),
-  );
-}
 
-  Widget buildInput(
-    String label,
-    String hint,
-    IconData icon, {
-    bool isPassword = false,
-  }) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label, style: const TextStyle(color: Colors.white)),
-        const SizedBox(height: 6),
-        TextField(
-          obscureText: isPassword,
-          decoration: InputDecoration(
-            filled: true,
-            fillColor: Colors.white,
-            hintText: hint,
-            prefixIcon: Icon(icon),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide.none,
+                const SizedBox(height: 20),
+              ],
             ),
           ),
         ),
-      ],
-    );
-  }
-
-  Widget socialButton(String text, IconData icon) {
-    return SizedBox(
-      width: double.infinity,
-      height: 50,
-      child: ElevatedButton.icon(
-        style: ElevatedButton.styleFrom(
-          backgroundColor: Colors.white,
-          foregroundColor: Colors.black87,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-        ),
-        onPressed: () {},
-        icon: Icon(icon),
-        label: Text(text),
       ),
     );
   }

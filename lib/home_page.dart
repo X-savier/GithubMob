@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'search_field.dart';
 import 'profile_screen.dart';
 import 'unit_details.dart';
-import 'filter_widget.dart';
+import 'property_data.dart';
 
 void main() {
   runApp(const ViewXRentApp());
@@ -29,29 +29,39 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int selectedCategory = 0;
-  Map<String, dynamic> currentFilters = {};
+  double? userLat;
+  double? userLng;
+  String _userCity = '';
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadData();
+  }
+
+  Future<void> _loadData() async {
+    try {
+      await fetchProperties();
+    } catch (e) {
+      debugPrint('HomeScreen _loadData error: $e');
+    }
+    final pos = await getUserLocation();
+    if (mounted) {
+      setState(() {
+        userLat = pos?.latitude ?? 14.3270;
+        userLng = pos?.longitude ?? 120.9540;
+        computeDistances(allProperties, userLat!, userLng!);
+        _userCity = detectUserCity(allProperties);
+        _isLoading = false;
+      });
+    }
+  }
 
   void updateCategory(int category) {
     setState(() {
       selectedCategory = category;
     });
-  }
-
-  void applyFilters(Map<String, dynamic> filters) {
-    setState(() {
-      currentFilters = filters;
-    });
-    String message = 'Filters applied: ';
-    if (filters['bedrooms'] > 0) message += '${filters['bedrooms']} bed, ';
-    if (filters['bathrooms'] > 0) message += '${filters['bathrooms']} bath, ';
-    message += '${filters['minArea']}-${filters['maxArea']}m²';
-    
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: const Color(0xfff36c6c),
-      ),
-    );
   }
 
   @override
@@ -60,10 +70,16 @@ class _HomeScreenState extends State<HomeScreen> {
       backgroundColor: const Color(0xfff5f5f5),
       bottomNavigationBar: const CustomBottomNav(),
       body: SafeArea(
-        child: SingleChildScrollView(
+        child: _isLoading
+            ? const Center(
+                child: CircularProgressIndicator(
+                  color: Color(0xfff36c6c),
+                ),
+              )
+            : SingleChildScrollView(
           child: Column(
             children: [
-              HeaderSection(onFilterTap: applyFilters),
+              const HeaderSection(),
               const SizedBox(height: 15),
               CategorySection(
                 selectedCategory: selectedCategory,
@@ -72,7 +88,7 @@ class _HomeScreenState extends State<HomeScreen> {
               const SizedBox(height: 15),
               FeaturedSection(
                 selectedCategory: selectedCategory,
-                filters: currentFilters,
+                userCity: _userCity,
               ),
               const SizedBox(height: 20),
             ],
@@ -88,9 +104,7 @@ class _HomeScreenState extends State<HomeScreen> {
 ////////////////////////////////////////////////////////
 
 class HeaderSection extends StatelessWidget {
-  final Function(Map<String, dynamic>) onFilterTap;
-
-  const HeaderSection({super.key, required this.onFilterTap});
+  const HeaderSection({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -190,17 +204,15 @@ class HeaderSection extends StatelessWidget {
           /// SEARCH BAR
           GestureDetector(
             onTap: () {
-              showModalBottomSheet(
-                context: context,
-                isScrollControlled: true,
-                backgroundColor: Colors.transparent,
-                builder: (context) => FilterWidget(
-                  onApplyFilters: onFilterTap,
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const SearchFieldScreen(),
                 ),
               );
             },
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 15),
+              padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 12),
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(30),
@@ -213,6 +225,7 @@ class HeaderSection extends StatelessWidget {
                     child: Text(
                       "Search location or property...",
                       style: TextStyle(color: Colors.grey),
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                   Icon(Icons.tune, color: Colors.grey),
@@ -226,35 +239,6 @@ class HeaderSection extends StatelessWidget {
   }
 }
 
-////////////////////////////////////////////////////////
-/// PROPERTY MODEL
-////////////////////////////////////////////////////////
-
-class Property {
-  final String image;
-  final String title;
-  final String location;
-  final String price;
-  final int beds;
-  final String baths;
-  final String area;
-  final String? label;
-
-  Property({
-    required this.image,
-    required this.title,
-    required this.location,
-    required this.price,
-    required this.beds,
-    required this.baths,
-    required this.area,
-    this.label,
-  });
-}
-
-////////////////////////////////////////////////////////
-/// CATEGORY SECTION
-////////////////////////////////////////////////////////
 
 class CategorySection extends StatelessWidget {
   final int selectedCategory;
@@ -275,10 +259,9 @@ class CategorySection extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 15),
         children: [
           _buildCategoryButton(context, "All", 0),
-          _buildCategoryButton(context, "Studio", 1),
-          _buildCategoryButton(context, "1 Bedroom", 2),
-          _buildCategoryButton(context, "2 Bedrooms", 3),
-          _buildCategoryButton(context, "3+ Bedrooms", 4),
+          _buildCategoryButton(context, "1 Bedroom", 1),
+          _buildCategoryButton(context, "2 Bedrooms", 2),
+          _buildCategoryButton(context, "3+ Bedrooms", 3),
         ],
       ),
     );
@@ -325,12 +308,12 @@ class CategorySection extends StatelessWidget {
 
 class FeaturedSection extends StatefulWidget {
   final int selectedCategory;
-  final Map<String, dynamic> filters;
+  final String userCity;
 
   const FeaturedSection({
     super.key,
     required this.selectedCategory,
-    required this.filters,
+    required this.userCity,
   });
 
   @override
@@ -338,234 +321,39 @@ class FeaturedSection extends StatefulWidget {
 }
 
 class _FeaturedSectionState extends State<FeaturedSection> {
-  bool showAll = false;
-
-  // STUDIO APARTMENTS
-  final List<Property> studioProperties = [
-    Property(
-      image: "assets/images/property1.jpg",
-      title: "Modern Studio Apartment",
-      location: "Makati City, Metro Manila",
-      price: "P2,000/month",
-      beds: 1,
-      baths: "1",
-      area: "25m²",
-      label: "Popular",
-    ),
-    Property(
-      image: "assets/images/property3.jpg",
-      title: "Cozy Studio Loft",
-      location: "Makati City",
-      price: "P3,000/month",
-      beds: 1,
-      baths: "1",
-      area: "30m²",
-    ),
-    Property(
-      image: "assets/images/property8.jpg",
-      title: "Minimalist Studio",
-      location: "BGC, Taguig",
-      price: "P3,200/month",
-      beds: 1,
-      baths: "1",
-      area: "28m²",
-      label: "New",
-    ),
-  ];
-
-  // 1 BEDROOM PROPERTIES
-  final List<Property> oneBedroomProperties = [
-    Property(
-      image: "assets/images/property4.jpg",
-      title: "1BR Modern Unit",
-      location: "Pasig City",
-      price: "P2,850/month",
-      beds: 1,
-      baths: "1",
-      area: "35m²",
-      label: "Popular",
-    ),
-    Property(
-      image: "assets/images/property9.jpg",
-      title: "1BR with Balcony",
-      location: "Makati City",
-      price: "P3,500/month",
-      beds: 1,
-      baths: "1",
-      area: "40m²",
-    ),
-    Property(
-      image: "assets/images/property10.jpg",
-      title: "1BR Executive Suite",
-      location: "Ortigas Center",
-      price: "P4,000/month",
-      beds: 1,
-      baths: "1",
-      area: "45m²",
-    ),
-  ];
-
-  // 2 BEDROOM PROPERTIES
-  final List<Property> twoBedroomProperties = [
-    Property(
-      image: "assets/images/property2.jpg",
-      title: "Spacious 2BR Condo",
-      location: "BGC, Taguig",
-      price: "P4,500/month",
-      beds: 2,
-      baths: "2",
-      area: "65m²",
-      label: "Featured",
-    ),
-    Property(
-      image: "assets/images/property5.jpg",
-      title: "2BR Family Home",
-      location: "Quezon City",
-      price: "P3,500/month",
-      beds: 2,
-      baths: "2",
-      area: "50m²",
-    ),
-    Property(
-      image: "assets/images/property11.jpg",
-      title: "2BR Garden Unit",
-      location: "Pasay City",
-      price: "P4,200/month",
-      beds: 2,
-      baths: "2",
-      area: "55m²",
-    ),
-  ];
-
-  // 3+ BEDROOM PROPERTIES
-  final List<Property> threePlusBedroomProperties = [
-    Property(
-      image: "assets/images/property6.jpg",
-      title: "3BR Townhouse",
-      location: "Mandaluyong",
-      price: "P5,500/month",
-      beds: 3,
-      baths: "2",
-      area: "85m²",
-      label: "Popular",
-    ),
-    Property(
-      image: "assets/images/property7.jpg",
-      title: "4BR Villa",
-      location: "Alabang",
-      price: "P8,000/month",
-      beds: 4,
-      baths: "3",
-      area: "120m²",
-      label: "Luxury",
-    ),
-    Property(
-      image: "assets/images/property13.jpg",
-      title: "3BR Duplex",
-      location: "Quezon City",
-      price: "P6,200/month",
-      beds: 3,
-      baths: "2",
-      area: "90m²",
-    ),
-  ];
-
-  List<Property> getAllProperties() {
-    return [
-      studioProperties[0],
-      oneBedroomProperties[0],
-      twoBedroomProperties[0],
-      threePlusBedroomProperties[0],
-    ];
-  }
-
-  bool passesFilters(Property property) {
-    final filters = widget.filters;
-    if (filters.isEmpty) return true;
-    
-    if (filters.containsKey('bedrooms') && filters['bedrooms'] > 0) {
-      if (property.beds != filters['bedrooms']) return false;
-    }
-    
-    if (filters.containsKey('bathrooms') && filters['bathrooms'] > 0) {
-      int propBaths = int.tryParse(property.baths) ?? 0;
-      if (propBaths != filters['bathrooms']) return false;
-    }
-    
-    if (filters.containsKey('minArea') && filters.containsKey('maxArea')) {
-      int propArea = int.tryParse(property.area.replaceAll('m²', '')) ?? 0;
-      if (propArea < filters['minArea'] || propArea > filters['maxArea']) return false;
-    }
-    
-    if (filters.containsKey('city') && filters['city'] != 'Any') {
-      if (!property.location.contains(filters['city'])) return false;
-    }
-    
-    if (filters.containsKey('propertyType') && filters['propertyType'] != 'Any') {
-      if (!property.title.contains(filters['propertyType'])) return false;
-    }
-    
-    return true;
-  }
+  bool _showingNearest = false;
 
   List<Property> get currentProperties {
-    List<Property> props;
-    switch (widget.selectedCategory) {
-      case 1:
-        props = studioProperties;
-        break;
-      case 2:
-        props = oneBedroomProperties;
-        break;
-      case 3:
-        props = twoBedroomProperties;
-        break;
-      case 4:
-        props = threePlusBedroomProperties;
-        break;
-      default:
-        props = getAllProperties();
+    // First try properties in user's city
+    final cityProps = propertiesInCity(widget.userCity);
+    final filtered = propertiesByCategory(widget.selectedCategory, source: cityProps);
+    if (filtered.isNotEmpty) {
+      _showingNearest = false;
+      return filtered;
     }
-    return props.where((p) => passesFilters(p)).toList();
-  }
-
-  List<Property> get displayedProperties {
-    if (showAll) {
-      return currentProperties;
-    } else {
-      return currentProperties.take(2).toList();
-    }
+    // Fallback: show nearest properties with category filter
+    _showingNearest = true;
+    final nearest = nearestProperties();
+    return propertiesByCategory(widget.selectedCategory, source: nearest);
   }
 
   String getCategoryTitle() {
-    if (showAll) {
-      switch (widget.selectedCategory) {
-        case 1: return "All Studio Apartments";
-        case 2: return "All 1 Bedroom Properties";
-        case 3: return "All 2 Bedroom Properties";
-        case 4: return "All 3+ Bedroom Properties";
-        default: return "All Featured Properties";
-      }
-    } else {
-      switch (widget.selectedCategory) {
-        case 1: return "Studio Apartments";
-        case 2: return "1 Bedroom Properties";
-        case 3: return "2 Bedroom Properties";
-        case 4: return "3+ Bedroom Properties";
-        default: return "Featured Properties";
-      }
-    }
-  }
+    final cityLabel = widget.userCity.isNotEmpty ? widget.userCity : 'Your Area';
+    final prefix = _showingNearest ? 'Nearest ' : '';
+    final inCity = _showingNearest ? '' : ' in $cityLabel';
 
-  void toggleShowAll() {
-    setState(() {
-      showAll = !showAll;
-    });
+    switch (widget.selectedCategory) {
+      case 1: return '${prefix}Studio Apartments$inCity';
+      case 2: return '${prefix}1 Bedroom Properties$inCity';
+      case 3: return '${prefix}2 Bedroom Properties$inCity';
+      case 4: return '${prefix}3+ Bedroom Properties$inCity';
+      default: return '${prefix}Featured Properties$inCity';
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    List<Property> properties = displayedProperties;
+    List<Property> properties = currentProperties;
 
     if (properties.isEmpty) {
       return Padding(
@@ -573,25 +361,11 @@ class _FeaturedSectionState extends State<FeaturedSection> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Text(
-                  getCategoryTitle(),
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                ),
-                const Spacer(),
-                if (currentProperties.length > 2)
-                  GestureDetector(
-                    onTap: toggleShowAll,
-                    child: Text(
-                      showAll ? "Show Less" : "See All",
-                      style: const TextStyle(
-                        color: Color(0xfff36c6c),
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ),
-              ],
+            Text(
+              getCategoryTitle(),
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              overflow: TextOverflow.ellipsis,
+              maxLines: 1,
             ),
             const SizedBox(height: 15),
             Container(
@@ -623,25 +397,11 @@ class _FeaturedSectionState extends State<FeaturedSection> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Text(
-                getCategoryTitle(),
-                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-              ),
-              const Spacer(),
-              if (currentProperties.length > 2)
-                GestureDetector(
-                  onTap: toggleShowAll,
-                  child: Text(
-                    showAll ? "Show Less" : "See All",
-                    style: const TextStyle(
-                      color: Color(0xfff36c6c),
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ),
-            ],
+          Text(
+            getCategoryTitle(),
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            overflow: TextOverflow.ellipsis,
+            maxLines: 1,
           ),
           const SizedBox(height: 15),
 
@@ -656,18 +416,13 @@ class _FeaturedSectionState extends State<FeaturedSection> {
                 baths: property.baths,
                 area: property.area,
                 label: property.label ?? "",
+                distanceKm: property.distanceKm,
                 onTap: () {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
                       builder: (context) => UnitDetailsScreen(
-                        image: property.image,
-                        title: property.title,
-                        location: property.location,
-                        price: property.price.replaceAll('P', ''),
-                        beds: property.beds.toString(),
-                        baths: property.baths,
-                        area: property.area,
+                        property: property,
                       ),
                     ),
                   );
@@ -683,21 +438,12 @@ class _FeaturedSectionState extends State<FeaturedSection> {
               ),
               const SizedBox(height: 15),
             ],
-          )).toList(),
+          )),
         ],
       ),
     );
   }
 
-  @override
-  void didUpdateWidget(FeaturedSection oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.selectedCategory != widget.selectedCategory) {
-      setState(() {
-        showAll = false;
-      });
-    }
-  }
 }
 
 /// Property Card Widget
@@ -710,6 +456,7 @@ class PropertyCard extends StatelessWidget {
   final String baths;
   final String area;
   final String label;
+  final double? distanceKm;
   final VoidCallback onTap;
   final Function(String) onFavoriteTap;
 
@@ -725,6 +472,7 @@ class PropertyCard extends StatelessWidget {
     required this.label,
     required this.onTap,
     required this.onFavoriteTap,
+    this.distanceKm,
   });
 
   @override
@@ -753,25 +501,7 @@ class PropertyCard extends StatelessWidget {
                   borderRadius: const BorderRadius.vertical(
                     top: Radius.circular(15),
                   ),
-                  child: Image.asset(
-                    image,
-                    height: 160,
-                    width: double.infinity,
-                    fit: BoxFit.cover,
-                    errorBuilder: (context, error, stackTrace) {
-                      return Container(
-                        height: 160,
-                        color: Colors.grey[300],
-                        child: const Center(
-                          child: Icon(
-                            Icons.broken_image,
-                            size: 50,
-                            color: Colors.grey,
-                          ),
-                        ),
-                      );
-                    },
-                  ),
+                  child: _buildPropertyImage(image, 160),
                 ),
                 if (label.isNotEmpty)
                   Positioned(
@@ -842,6 +572,17 @@ class PropertyCard extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
+                      if (distanceKm != null) ...[
+                        const SizedBox(width: 6),
+                        Text(
+                          "${distanceKm!.toStringAsFixed(1)} km",
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Colors.grey[600],
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                   const SizedBox(height: 5),
@@ -854,12 +595,12 @@ class PropertyCard extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 8),
-                  Row(
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 6,
                     children: [
                       _buildInfoChip(Icons.bed, beds, 'Bed'),
-                      const SizedBox(width: 8),
                       _buildInfoChip(Icons.bathtub, baths, 'Bath'),
-                      const SizedBox(width: 8),
                       _buildInfoChip(Icons.square_foot, area, ''),
                     ],
                   ),
@@ -888,6 +629,53 @@ class PropertyCard extends StatelessWidget {
             label.isEmpty ? value : '$value $label',
             style: const TextStyle(fontSize: 11),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPropertyImage(String imageSource, double height) {
+    final isUrl = imageSource.startsWith('http://') ||
+        imageSource.startsWith('https://');
+
+    if (isUrl) {
+      return Image.network(
+        imageSource,
+        height: height,
+        width: double.infinity,
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) {
+          return _imagePlaceholder(height);
+        },
+      );
+    }
+
+    if (imageSource.isNotEmpty) {
+      return Image.asset(
+        imageSource,
+        height: height,
+        width: double.infinity,
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) {
+          return _imagePlaceholder(height);
+        },
+      );
+    }
+
+    return _imagePlaceholder(height);
+  }
+
+  Widget _imagePlaceholder(double height) {
+    return Container(
+      height: height,
+      width: double.infinity,
+      color: Colors.grey[300],
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.apartment, size: 50, color: Colors.grey[500]),
+          const SizedBox(height: 4),
+          Text('No Photo', style: TextStyle(color: Colors.grey[500], fontSize: 12)),
         ],
       ),
     );

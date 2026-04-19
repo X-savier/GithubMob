@@ -1,17 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'application_view.dart';
-
-void main() {
-  WidgetsFlutterBinding.ensureInitialized();
-  SystemChrome.setSystemUIOverlayStyle(
-    const SystemUiOverlayStyle(
-      statusBarColor: Colors.transparent,
-      statusBarIconBrightness: Brightness.light,
-    ),
-  );
-  runApp(const RentalManagementApp());
-}
+import 'property_data.dart';
 
 // ─── Colors ───────────────────────────────────────────────────────────────────
 
@@ -40,6 +31,7 @@ const double kPadding = 16.0;
 // ─── Models ───────────────────────────────────────────────────────────────────
 
 class UnitModel {
+  final String id;
   final String title;
   final String beds;
   final String baths;
@@ -50,6 +42,7 @@ class UnitModel {
   final String imageUrl;
 
   const UnitModel({
+    required this.id,
     required this.title,
     required this.beds,
     required this.baths,
@@ -64,81 +57,18 @@ class UnitModel {
 enum AppStatus { pending, approved, rejected }
 
 class ApplicantModel {
+  final String id;
   final String name;
   final String appliedDate;
   final AppStatus status;
 
   const ApplicantModel({
+    required this.id,
     required this.name,
     required this.appliedDate,
     required this.status,
   });
 }
-
-// ─── Sample Data ──────────────────────────────────────────────────────────────
-
-const sampleUnits = [
-  UnitModel(
-    title: 'Modern Studio Appartment',
-    beds: '1',
-    baths: '1',
-    size: '25m\u00b2',
-    location: 'Makati City, Metro Manila',
-    price: '\u20b14,000',
-    applicantCount: 3,
-    imageUrl:
-        'https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?w=600&q=80',
-  ),
-  UnitModel(
-    title: '2 Floor Appartment',
-    beds: '4',
-    baths: '3',
-    size: '85m\u00b2',
-    location: 'Makati City, Metro Manila',
-    price: '\u20b14,500',
-    applicantCount: 3,
-    imageUrl:
-        'https://images.unsplash.com/photo-1580587771525-78b9dba3b914?w=600&q=80',
-  ),
-  UnitModel(
-    title: 'Deluxe Corner Unit',
-    beds: '2',
-    baths: '2',
-    size: '45m\u00b2',
-    location: 'BGC, Taguig City',
-    price: '\u20b16,200',
-    applicantCount: 5,
-    imageUrl:
-        'https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?w=600&q=80',
-  ),
-];
-
-const sampleApplicants = [
-  ApplicantModel(
-      name: 'Juan Dela Cruz',
-      appliedDate: 'Feb 10, 2025',
-      status: AppStatus.pending),
-  ApplicantModel(
-      name: 'Maria Santos',
-      appliedDate: 'Feb 10, 2025',
-      status: AppStatus.pending),
-  ApplicantModel(
-      name: 'Pedro Reyes',
-      appliedDate: 'Feb 11, 2025',
-      status: AppStatus.approved),
-  ApplicantModel(
-      name: 'Ana Gomez',
-      appliedDate: 'Feb 12, 2025',
-      status: AppStatus.approved),
-  ApplicantModel(
-      name: 'Carlo Bautista',
-      appliedDate: 'Feb 09, 2025',
-      status: AppStatus.rejected),
-  ApplicantModel(
-      name: 'Liza Torres',
-      appliedDate: 'Feb 08, 2025',
-      status: AppStatus.pending),
-];
 
 // ─── App Root ─────────────────────────────────────────────────────────────────
 
@@ -464,7 +394,7 @@ class UnitCard extends StatelessWidget {
                     ),
                   );
                 },
-                errorBuilder: (_, __, ___) => Container(
+                errorBuilder: (_, _, _) => Container(
                   height: 160,
                   color: const Color(0xFFEEEEF2),
                   child: const Center(
@@ -523,12 +453,6 @@ class UnitCard extends StatelessWidget {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      RichText(
-                        text: const TextSpan(
-                          children: [],
-                        ),
-                        textScaler: TextScaler.noScaling,
-                      ),
                       Text.rich(
                         TextSpan(
                           children: [
@@ -553,10 +477,10 @@ class UnitCard extends StatelessWidget {
                         ),
                       ),
                       Text(
-                        'Applicants (${unit.applicantCount})',
+                        'Pending Applicants (${unit.applicantCount})',
                         style: const TextStyle(
                           fontSize: 12,
-                          color: AppColors.textSecondary,
+                          color: AppColors.pendingText,
                           fontWeight: FontWeight.w500,
                         ),
                       ),
@@ -669,7 +593,43 @@ class ApplicantsScreen extends StatefulWidget {
 }
 
 class _ApplicantsScreenState extends State<ApplicantsScreen> {
-  int _navIndex = 0;
+  List<UnitModel> _units = [];
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUnits();
+  }
+
+  Future<void> _loadUnits() async {
+    setState(() => _isLoading = true);
+    try {
+      final listings = await fetchLandlordListings();
+      final listingIds = listings.map((l) => l.id!).toList();
+      final counts = listingIds.isNotEmpty
+          ? await fetchApplicationCounts(listingIds)
+          : <String, int>{};
+
+      setState(() {
+        _units = listings.map((l) => UnitModel(
+          id: l.id ?? '',
+          title: l.title,
+          beds: l.beds.toString(),
+          baths: l.baths,
+          size: l.area,
+          location: l.location,
+          price: l.price.replaceAll('/month', ''),
+          applicantCount: counts[l.id] ?? 0,
+          imageUrl: l.image,
+        )).toList();
+      });
+    } catch (e) {
+      debugPrint('_loadUnits ERROR: $e');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -677,44 +637,55 @@ class _ApplicantsScreenState extends State<ApplicantsScreen> {
       backgroundColor: AppColors.background,
       body: Column(
         children: [
-          GradientHeader(title: 'Applicants', onBack: () {}),
+          GradientHeader(title: 'Applicants', onBack: () => Navigator.pop(context)),
           Expanded(
-            child: ListView(
-              padding: const EdgeInsets.only(bottom: 24),
-              children: [
-                const Padding(
-                  padding: EdgeInsets.fromLTRB(16, 18, 16, 4),
-                  child: Text(
-                    'Units',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.textPrimary,
-                      letterSpacing: -0.2,
-                    ),
-                  ),
-                ),
-                ...sampleUnits.map(
-                  (unit) => UnitCard(
-                    unit: unit,
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => ApplicationsScreen(
-                          unitTitle: unit.title,
+            child: _isLoading
+                ? const Center(child: CircularProgressIndicator(color: AppColors.coral))
+                : _units.isEmpty
+                    ? const Center(
+                        child: Text('No listings yet',
+                            style: TextStyle(color: AppColors.textSecondary)),
+                      )
+                    : RefreshIndicator(
+                        onRefresh: _loadUnits,
+                        color: AppColors.coral,
+                        child: ListView(
+                          padding: const EdgeInsets.only(bottom: 24),
+                          children: [
+                            const Padding(
+                              padding: EdgeInsets.fromLTRB(16, 18, 16, 4),
+                              child: Text(
+                                'Units',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppColors.textPrimary,
+                                  letterSpacing: -0.2,
+                                ),
+                              ),
+                            ),
+                            ..._units.map(
+                              (unit) => UnitCard(
+                                unit: unit,
+                                onTap: () async {
+                                  await Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => ApplicationsScreen(
+                                        listingId: unit.id,
+                                        unitTitle: unit.title,
+                                      ),
+                                    ),
+                                  );
+                                  _loadUnits();
+                                },
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
           ),
         ],
-      ),
-      bottomNavigationBar: BottomNavBar(
-        selectedIndex: _navIndex,
-        onTap: (i) => setState(() => _navIndex = i),
       ),
     );
   }
@@ -723,9 +694,14 @@ class _ApplicantsScreenState extends State<ApplicantsScreen> {
 // ─── Screen 2: Applications ────────────────────────────────────────────────
 
 class ApplicationsScreen extends StatefulWidget {
+  final String listingId;
   final String unitTitle;
 
-  const ApplicationsScreen({super.key, required this.unitTitle});
+  const ApplicationsScreen({
+    super.key,
+    required this.listingId,
+    required this.unitTitle,
+  });
 
   @override
   State<ApplicationsScreen> createState() => _ApplicationsScreenState();
@@ -733,6 +709,63 @@ class ApplicationsScreen extends StatefulWidget {
 
 class _ApplicationsScreenState extends State<ApplicationsScreen> {
   int _tabIndex = 0;
+  List<ApplicantModel> _allApplicants = [];
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadApplicants();
+  }
+
+  Future<void> _loadApplicants() async {
+    setState(() => _isLoading = true);
+    try {
+      final apps = await fetchApplicationsForListing(widget.listingId);
+      setState(() {
+        _allApplicants = apps.map((a) {
+          final statusStr = (a['status'] ?? 'pending').toString().toLowerCase();
+          AppStatus status;
+          switch (statusStr) {
+            case 'approved':
+              status = AppStatus.approved;
+              break;
+            case 'rejected':
+              status = AppStatus.rejected;
+              break;
+            default:
+              status = AppStatus.pending;
+          }
+
+          final firstName = a['first_name']?.toString() ?? '';
+          final lastName = a['last_name']?.toString() ?? '';
+          final name = '$firstName $lastName'.trim();
+
+          final createdAt = a['submitted_at']?.toString() ?? '';
+          String appliedDate = createdAt;
+          if (createdAt.isNotEmpty) {
+            try {
+              final dt = DateTime.parse(createdAt);
+              const months = ['Jan','Feb','Mar','Apr','May','Jun',
+                              'Jul','Aug','Sep','Oct','Nov','Dec'];
+              appliedDate = '${months[dt.month - 1]} ${dt.day}, ${dt.year}';
+            } catch (_) {}
+          }
+
+          return ApplicantModel(
+            id: a['id']?.toString() ?? '',
+            name: name.isEmpty ? 'Unknown' : name,
+            appliedDate: appliedDate,
+            status: status,
+          );
+        }).toList();
+      });
+    } catch (e) {
+      debugPrint('_loadApplicants ERROR: $e');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
 
   List<ApplicantModel> get _filtered {
     final statusList = [
@@ -740,7 +773,7 @@ class _ApplicationsScreenState extends State<ApplicationsScreen> {
       AppStatus.approved,
       AppStatus.rejected,
     ];
-    return sampleApplicants
+    return _allApplicants
         .where((a) => a.status == statusList[_tabIndex])
         .toList();
   }
@@ -758,29 +791,33 @@ class _ApplicationsScreenState extends State<ApplicationsScreen> {
             onChanged: (i) => setState(() => _tabIndex = i),
           ),
           Expanded(
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 240),
-              switchInCurve: Curves.easeOut,
-              child: _filtered.isEmpty
-                  ? _EmptyState(key: ValueKey(_tabIndex), tabIndex: _tabIndex)
-                  : ListView.builder(
-                      key: ValueKey('list_$_tabIndex'),
-                      padding: const EdgeInsets.only(bottom: 28, top: 6),
-                      itemCount: _filtered.length,
-                      itemBuilder: (_, i) => ApplicantCard(
-                        applicant: _filtered[i],
-                        onView: () {
-                          // Navigate directly to ApplicationDetailsScreen
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const ApplicationDetailsScreen(),
+            child: _isLoading
+                ? const Center(child: CircularProgressIndicator(color: AppColors.coral))
+                : AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 240),
+                    switchInCurve: Curves.easeOut,
+                    child: _filtered.isEmpty
+                        ? _EmptyState(key: ValueKey(_tabIndex), tabIndex: _tabIndex)
+                        : ListView.builder(
+                            key: ValueKey('list_$_tabIndex'),
+                            padding: const EdgeInsets.only(bottom: 28, top: 6),
+                            itemCount: _filtered.length,
+                            itemBuilder: (_, i) => ApplicantCard(
+                              applicant: _filtered[i],
+                              onView: () async {
+                                await Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => ApplicationDetailsScreen(
+                                      applicationId: _filtered[i].id,
+                                    ),
+                                  ),
+                                );
+                                _loadApplicants();
+                              },
                             ),
-                          );
-                        },
-                      ),
-                    ),
-            ),
+                          ),
+                  ),
           ),
         ],
       ),

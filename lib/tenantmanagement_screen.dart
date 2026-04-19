@@ -262,7 +262,7 @@ class TenantManagementScreen extends StatelessWidget {
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: DropdownButtonFormField<String>(
-                    value: 'Maintenance',
+                    initialValue: 'Maintenance',
                     decoration: const InputDecoration(
                       border: InputBorder.none,
                       labelText: 'Report Type',
@@ -308,7 +308,7 @@ class TenantManagementScreen extends StatelessWidget {
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: DropdownButtonFormField<String>(
-                    value: 'Medium',
+                    initialValue: 'Medium',
                     decoration: const InputDecoration(
                       border: InputBorder.none,
                       labelText: 'Priority Type',

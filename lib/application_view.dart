@@ -1,16 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-
-void main() {
-  WidgetsFlutterBinding.ensureInitialized();
-  SystemChrome.setSystemUIOverlayStyle(
-    const SystemUiOverlayStyle(
-      statusBarColor: Colors.transparent,
-      statusBarIconBrightness: Brightness.light,
-    ),
-  );
-  runApp(const App());
-}
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'property_data.dart';
 
 // ─── Colors ───────────────────────────────────────────────────────────────────
 
@@ -30,23 +22,7 @@ class C {
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 
-class App extends StatelessWidget {
-  const App({super.key});
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Application Details',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        fontFamily: 'Roboto',
-        scaffoldBackgroundColor: C.bg,
-        colorScheme: ColorScheme.fromSeed(seedColor: C.coral),
-      ),
-      home: const ApplicationDetailsScreen(),
-    );
-  }
-}
+// (Standalone App removed — navigated to from enlistment_application.dart)
 
 // ─── Status enum ─────────────────────────────────────────────────────────────
 
@@ -61,6 +37,7 @@ class ApplicationData {
   final String previousAddress, reasonForLeaving, rentalDuration,
       previousLandlord, landlordContact, rentalReasonLeaving;
   final List<String> documents;
+  final List<String> documentUrls;
 
   const ApplicationData({
     required this.name,
@@ -81,34 +58,72 @@ class ApplicationData {
     required this.landlordContact,
     required this.rentalReasonLeaving,
     required this.documents,
+    required this.documentUrls,
   });
-}
 
-const _sampleData = ApplicationData(
-  name: 'Juan Dela Cruz',
-  dob: 'dd/mm/yyy',
-  email: 'juandelacruz@email.com',
-  phone: '(555) 123-4567',
-  currentAddress: '456 Oak Street, Apt 2C, Springfield',
-  employmentStatus: 'Employed',
-  jobTitle: 'Software Engineer',
-  company: 'Tech Corp Inc.',
-  monthlyIncome: '\u20b120,000',
-  lengthOfEmployment: '3 Years 2 months',
-  workAddress: 'Trece Martires City',
-  previousAddress: '789 Pine Avenue, Springfield',
-  reasonForLeaving: 'Relocating for job',
-  rentalDuration: '2 Years 1 month',
-  previousLandlord: 'Juanito jose tinapa',
-  landlordContact: '+63 912 345 6789',
-  rentalReasonLeaving: 'Broken',
-  documents: ['Valid ID', 'Valid ID (Back)', 'Proof of Income'],
-);
+  factory ApplicationData.fromMap(Map<String, dynamic> map, List<Map<String, dynamic>> docs) {
+    final firstName = map['first_name']?.toString() ?? '';
+    final lastName = map['last_name']?.toString() ?? '';
+
+    String rentalDuration = '';
+    final moveIn = map['move_in_date']?.toString() ?? '';
+    final moveOut = map['move_out_date']?.toString() ?? '';
+    if (moveIn.isNotEmpty && moveOut.isNotEmpty) {
+      rentalDuration = '$moveIn – $moveOut';
+    }
+
+    final docNames = docs.map((d) {
+      final type = d['document_type']?.toString() ?? 'Document';
+      switch (type) {
+        case 'primary_id_front':
+          return 'Valid ID (Front)';
+        case 'primary_id_back':
+          return 'Valid ID (Back)';
+        case 'secondary_id':
+          return 'Secondary ID';
+        case 'selfie_with_id':
+          return 'Selfie with ID';
+        case 'proof_of_income':
+          return 'Proof of Income';
+        case 'employment_cert':
+          return 'Employment Certificate';
+        default:
+          return type;
+      }
+    }).toList();
+
+    final docUrls = docs.map((d) => d['url']?.toString() ?? '').toList();
+
+    return ApplicationData(
+      name: '$firstName $lastName'.trim(),
+      dob: map['date_of_birth']?.toString() ?? '',
+      email: map['email']?.toString() ?? '',
+      phone: map['phone_number']?.toString() ?? '',
+      currentAddress: map['current_address']?.toString() ?? '',
+      employmentStatus: map['employment_status']?.toString() ?? '',
+      jobTitle: map['job_title']?.toString() ?? '',
+      company: map['company_name']?.toString() ?? '',
+      monthlyIncome: map['monthly_income'] != null ? '₱${map['monthly_income']}' : '',
+      lengthOfEmployment: map['employment_length']?.toString() ?? '',
+      workAddress: map['work_address']?.toString() ?? '',
+      previousAddress: map['previous_address']?.toString() ?? '',
+      reasonForLeaving: map['reason_for_leaving']?.toString() ?? '',
+      rentalDuration: rentalDuration,
+      previousLandlord: map['previous_landlord']?.toString() ?? '',
+      landlordContact: map['landlord_contact']?.toString() ?? '',
+      rentalReasonLeaving: map['reason_for_leaving']?.toString() ?? '',
+      documents: docNames,
+      documentUrls: docUrls,
+    );
+  }
+}
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
 class ApplicationDetailsScreen extends StatefulWidget {
-  const ApplicationDetailsScreen({super.key});
+  final String applicationId;
+
+  const ApplicationDetailsScreen({super.key, required this.applicationId});
   @override
   State<ApplicationDetailsScreen> createState() =>
       _ApplicationDetailsScreenState();
@@ -116,7 +131,51 @@ class ApplicationDetailsScreen extends StatefulWidget {
 
 class _ApplicationDetailsScreenState extends State<ApplicationDetailsScreen> {
   AppStatus _status = AppStatus.pending;
-  final _data = _sampleData;
+  ApplicationData? _data;
+  bool _isLoading = true;
+  bool _isUpdating = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadApplication();
+  }
+
+  Future<void> _loadApplication() async {
+    try {
+      final app = await fetchApplicationDetails(widget.applicationId);
+      if (app == null) {
+        if (mounted) setState(() => _isLoading = false);
+        return;
+      }
+
+      final docs = await fetchApplicationDocuments(widget.applicationId);
+
+      final statusStr = (app['status'] ?? 'pending').toString().toLowerCase();
+      AppStatus status;
+      switch (statusStr) {
+        case 'approved':
+          status = AppStatus.approved;
+          break;
+        case 'rejected':
+          status = AppStatus.rejected;
+          break;
+        default:
+          status = AppStatus.pending;
+      }
+
+      if (mounted) {
+        setState(() {
+          _data = ApplicationData.fromMap(app, docs);
+          _status = status;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('_loadApplication ERROR: $e');
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
 
   Future<void> _onApprove() async {
     final ok = await ConfirmationDialog.show(
@@ -125,7 +184,22 @@ class _ApplicationDetailsScreenState extends State<ApplicationDetailsScreen> {
       message: 'Are you sure to Approve\nthis Applicant?',
       confirmColor: C.green,
     );
-    if (ok == true) setState(() => _status = AppStatus.approved);
+    if (ok == true) {
+      setState(() => _isUpdating = true);
+      final success =
+          await updateApplicationStatus(widget.applicationId, 'approved');
+      if (success && mounted) {
+        setState(() {
+          _status = AppStatus.approved;
+          _isUpdating = false;
+        });
+      } else if (mounted) {
+        setState(() => _isUpdating = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to approve')),
+        );
+      }
+    }
   }
 
   Future<void> _onReject() async {
@@ -135,11 +209,54 @@ class _ApplicationDetailsScreenState extends State<ApplicationDetailsScreen> {
       message: 'Are you sure to Reject\nthis Applicant?',
       confirmColor: C.red,
     );
-    if (ok == true) setState(() => _status = AppStatus.rejected);
+    if (ok == true) {
+      setState(() => _isUpdating = true);
+      final success =
+          await updateApplicationStatus(widget.applicationId, 'rejected');
+      if (success && mounted) {
+        setState(() {
+          _status = AppStatus.rejected;
+          _isUpdating = false;
+        });
+      } else if (mounted) {
+        setState(() => _isUpdating = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to reject')),
+        );
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoading) {
+      return Scaffold(
+        backgroundColor: C.bg,
+        body: Column(
+          children: [
+            const GradientHeader(title: 'Application Details'),
+            const Expanded(
+              child: Center(child: CircularProgressIndicator(color: C.coral)),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (_data == null) {
+      return Scaffold(
+        backgroundColor: C.bg,
+        body: Column(
+          children: [
+            const GradientHeader(title: 'Application Details'),
+            const Expanded(
+              child: Center(child: Text('Application not found')),
+            ),
+          ],
+        ),
+      );
+    }
+
     return Scaffold(
       backgroundColor: C.bg,
       body: Column(
@@ -157,7 +274,11 @@ class _ApplicationDetailsScreenState extends State<ApplicationDetailsScreen> {
                 const SizedBox(height: 14),
                 _documentsCard(),
                 const SizedBox(height: 22),
-                _actionButtons(),
+                if (_isUpdating)
+                  const Center(
+                      child: CircularProgressIndicator(color: C.coral))
+                else
+                  _actionButtons(),
               ],
             ),
           ),
@@ -172,7 +293,7 @@ class _ApplicationDetailsScreenState extends State<ApplicationDetailsScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            _data.name,
+            _data!.name,
             style: const TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.w700,
@@ -188,21 +309,21 @@ class _ApplicationDetailsScreenState extends State<ApplicationDetailsScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    LabelValue(label: 'Date of Birth', value: _data.dob),
+                    LabelValue(label: 'Date of Birth', value: _data!.dob),
                     const SizedBox(height: 12),
-                    LabelValue(label: 'Phone', value: _data.phone),
+                    LabelValue(label: 'Phone', value: _data!.phone),
                   ],
                 ),
               ),
               const SizedBox(width: 16),
               Expanded(
-                child: LabelValue(label: 'Email', value: _data.email),
+                child: LabelValue(label: 'Email', value: _data!.email),
               ),
             ],
           ),
           const SizedBox(height: 12),
           LabelValue(
-              label: 'Current Address', value: _data.currentAddress),
+              label: 'Current Address', value: _data!.currentAddress),
         ],
       ),
     );
@@ -218,23 +339,23 @@ class _ApplicationDetailsScreenState extends State<ApplicationDetailsScreen> {
           TwoColumnRow(
             left: LabelValue(
                 label: 'Employment Status',
-                value: _data.employmentStatus),
+                value: _data!.employmentStatus),
             right:
-                LabelValue(label: 'Job Title', value: _data.jobTitle),
+                LabelValue(label: 'Job Title', value: _data!.jobTitle),
           ),
           const SizedBox(height: 12),
           TwoColumnRow(
-            left: LabelValue(label: 'Company', value: _data.company),
+            left: LabelValue(label: 'Company', value: _data!.company),
             right: LabelValue(
-                label: 'Monthly Income', value: _data.monthlyIncome),
+                label: 'Monthly Income', value: _data!.monthlyIncome),
           ),
           const SizedBox(height: 12),
           TwoColumnRow(
             left: LabelValue(
                 label: 'Length of Employment',
-                value: _data.lengthOfEmployment),
+                value: _data!.lengthOfEmployment),
             right: LabelValue(
-                label: 'Work Address', value: _data.workAddress),
+                label: 'Work Address', value: _data!.workAddress),
           ),
         ],
       ),
@@ -251,28 +372,28 @@ class _ApplicationDetailsScreenState extends State<ApplicationDetailsScreen> {
           TwoColumnRow(
             left: LabelValue(
                 label: 'Previous Address',
-                value: _data.previousAddress),
+                value: _data!.previousAddress),
             right: LabelValue(
                 label: 'Reason for Leaving',
-                value: _data.reasonForLeaving),
+                value: _data!.reasonForLeaving),
           ),
           const SizedBox(height: 12),
           TwoColumnRow(
             left: LabelValue(
                 label: 'Rental Duration',
-                value: _data.rentalDuration),
+                value: _data!.rentalDuration),
             right: LabelValue(
                 label: 'Previous Landlord Name',
-                value: _data.previousLandlord),
+                value: _data!.previousLandlord),
           ),
           const SizedBox(height: 12),
           TwoColumnRow(
             left: LabelValue(
                 label: 'Landlord Contact Number',
-                value: _data.landlordContact),
+                value: _data!.landlordContact),
             right: LabelValue(
                 label: 'Reason for Leaving',
-                value: _data.rentalReasonLeaving),
+                value: _data!.rentalReasonLeaving),
           ),
         ],
       ),
@@ -286,25 +407,104 @@ class _ApplicationDetailsScreenState extends State<ApplicationDetailsScreen> {
         children: [
           const SectionTitle('Document'),
           const SizedBox(height: 12),
-          ..._data.documents.asMap().entries.map(
-                (e) => Padding(
-                  padding: EdgeInsets.only(top: e.key > 0 ? 10 : 0),
-                  child: DocumentItem(
-                    label: e.value,
-                    onView: () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('Viewing: ${e.value}'),
-                          backgroundColor: C.coral,
-                          behavior: SnackBarBehavior.floating,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                ),
+          ..._data!.documents.asMap().entries.map(
+                (e) {
+                  final url = e.key < _data!.documentUrls.length
+                      ? _data!.documentUrls[e.key]
+                      : '';
+                  return Padding(
+                    padding: EdgeInsets.only(top: e.key > 0 ? 10 : 0),
+                    child: DocumentItem(
+                      label: e.value,
+                      imageUrl: url,
+                      onView: () {
+                        if (url.isNotEmpty) {
+                          showDialog(
+                            context: context,
+                            builder: (_) => Dialog(
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14)),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  ClipRRect(
+                                    borderRadius: const BorderRadius.vertical(
+                                        top: Radius.circular(14)),
+                                    child: ConstrainedBox(
+                                      constraints: BoxConstraints(
+                                        maxHeight:
+                                            MediaQuery.of(context).size.height *
+                                                0.55,
+                                      ),
+                                      child: Image.network(
+                                        url,
+                                        fit: BoxFit.contain,
+                                        width: double.infinity,
+                                        loadingBuilder: (_, child, progress) {
+                                          if (progress == null) return child;
+                                          return const SizedBox(
+                                            height: 200,
+                                            child: Center(
+                                                child:
+                                                    CircularProgressIndicator()),
+                                          );
+                                        },
+                                        errorBuilder: (_, _, _) =>
+                                            const SizedBox(
+                                          height: 200,
+                                          child: Center(
+                                              child: Icon(Icons.broken_image,
+                                                  size: 48,
+                                                  color: Colors.grey)),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  Padding(
+                                    padding: const EdgeInsets.all(12),
+                                    child: Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            e.value,
+                                            style: const TextStyle(
+                                                fontSize: 13,
+                                                fontWeight: FontWeight.w600),
+                                          ),
+                                        ),
+                                        Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            TextButton(
+                                              onPressed: () async {
+                                                final uri = Uri.parse(url);
+                                                await launchUrl(uri,
+                                                    mode: LaunchMode
+                                                        .externalApplication);
+                                              },
+                                              child: const Text('Open in Browser'),
+                                            ),
+                                            TextButton(
+                                              onPressed: () =>
+                                                  Navigator.pop(context),
+                                              child: const Text('Close'),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        }
+                      },
+                    ),
+                  );
+                },
               ),
         ],
       ),
@@ -520,8 +720,9 @@ class SectionTitle extends StatelessWidget {
 
 class DocumentItem extends StatelessWidget {
   final String label;
+  final String imageUrl;
   final VoidCallback onView;
-  const DocumentItem({super.key, required this.label, required this.onView});
+  const DocumentItem({super.key, required this.label, this.imageUrl = '', required this.onView});
 
   @override
   Widget build(BuildContext context) {
@@ -535,18 +736,31 @@ class DocumentItem extends StatelessWidget {
       child: Row(
         children: [
           Container(
-            width: 32,
-            height: 32,
+            width: 40,
+            height: 40,
             decoration: BoxDecoration(
               color: Colors.white,
               borderRadius: BorderRadius.circular(8),
               border: Border.all(color: C.border),
             ),
-            child: const Icon(
-              Icons.description_outlined,
-              size: 16,
-              color: C.textLabel,
-            ),
+            child: imageUrl.isNotEmpty
+                ? ClipRRect(
+                    borderRadius: BorderRadius.circular(7),
+                    child: Image.network(
+                      imageUrl,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, _, _) => const Icon(
+                        Icons.broken_image_outlined,
+                        size: 18,
+                        color: C.textLabel,
+                      ),
+                    ),
+                  )
+                : const Icon(
+                    Icons.description_outlined,
+                    size: 16,
+                    color: C.textLabel,
+                  ),
           ),
           const SizedBox(width: 10),
           Expanded(

@@ -1,16 +1,11 @@
+import 'dart:io';
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-
-void main() {
-  WidgetsFlutterBinding.ensureInitialized();
-  SystemChrome.setSystemUIOverlayStyle(
-    const SystemUiOverlayStyle(
-      statusBarColor: Colors.transparent,
-      statusBarIconBrightness: Brightness.dark,
-    ),
-  );
-  runApp(const RentalApp());
-}
+import 'package:image_picker/image_picker.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'property_data.dart';
 
 // ─── Theme & Constants ────────────────────────────────────────────────────────
 
@@ -35,34 +30,12 @@ const double kCardPadding = 20.0;
 const double kFieldSpacing = 14.0;
 const double kButtonHeight = 52.0;
 
-// ─── App Root ─────────────────────────────────────────────────────────────────
-
-class RentalApp extends StatelessWidget {
-  const RentalApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Rental Application',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: AppColors.primary,
-          brightness: Brightness.light,
-        ),
-        fontFamily: 'Roboto',
-        scaffoldBackgroundColor: AppColors.background,
-      ),
-      home: const RentalApplicationScreen(),
-    );
-  }
-}
-
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
 class RentalApplicationScreen extends StatefulWidget {
-  const RentalApplicationScreen({super.key});
+  final String listingId;
+
+  const RentalApplicationScreen({super.key, required this.listingId});
 
   @override
   State<RentalApplicationScreen> createState() =>
@@ -106,7 +79,9 @@ class _RentalApplicationScreenState extends State<RentalApplicationScreen>
   final _reasonCtrl = TextEditingController();
 
   // Step 4
-  String? _idFront, _idBack, _proofOfIncome;
+  String? _idFront, _idBack;
+  XFile? _idFrontFile, _idBackFile;
+  bool _isSubmitting = false;
 
   // Step 5
   bool _agreed = false;
@@ -167,7 +142,7 @@ class _RentalApplicationScreenState extends State<RentalApplicationScreen>
     if (_currentStep > 0) _animateToStep(_currentStep - 1);
   }
 
-  void _submitApplication() {
+  Future<void> _submitApplication() async {
     if (!(_step5Key.currentState?.validate() ?? false)) return;
     if (!_agreed) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -180,25 +155,172 @@ class _RentalApplicationScreenState extends State<RentalApplicationScreen>
       );
       return;
     }
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Application Submitted!',
-            style: TextStyle(fontWeight: FontWeight.bold)),
-        content: const Text(
-            'Your rental application has been submitted successfully. The landlord will review it within 2–3 business days.'),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              Navigator.pop(context); // Go back to home screen
-            },
-            child: const Text('OK', style: TextStyle(color: AppColors.primary)),
+
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    if (userId == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please log in first')),
+        );
+      }
+      return;
+    }
+
+    setState(() => _isSubmitting = true);
+
+    try {
+      // Check if user already applied to this listing
+      final alreadyApplied = await hasAppliedToListing(widget.listingId);
+      if (alreadyApplied) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text('You have already submitted an application for this listing.'),
+              backgroundColor: Colors.orange.shade700,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+          );
+        }
+        return;
+      }
+
+      // Build application data
+      final applicationData = <String, dynamic>{
+        'tenant_id': userId,
+        'listing_id': widget.listingId,
+        'status': 'pending',
+        // Personal info
+        'first_name': _firstNameCtrl.text,
+        'last_name': _lastNameCtrl.text,
+        'email': _emailCtrl.text,
+        'phone_number': _phoneCtrl.text,
+        'date_of_birth': _dobCtrl.text.isEmpty ? null : _dobCtrl.text,
+        'current_address': _addressCtrl.text,
+        // Employment
+        'employment_status': _employmentStatus,
+        'company_name': _companyCtrl.text.isEmpty ? null : _companyCtrl.text,
+        'job_title': _jobTitleCtrl.text.isEmpty ? null : _jobTitleCtrl.text,
+        'monthly_income': _incomeCtrl.text.isEmpty ? null : double.tryParse(_incomeCtrl.text.replaceAll(RegExp(r'[^0-9.]'), '')),
+        'employment_length': _lengthCtrl.text.isEmpty ? null : _lengthCtrl.text,
+        'work_address': _workAddressCtrl.text.isEmpty ? null : _workAddressCtrl.text,
+        // Rental history
+        'previous_address': _prevAddressCtrl.text.isEmpty ? null : _prevAddressCtrl.text,
+        'move_in_date': _moveInCtrl.text.isEmpty ? null : _moveInCtrl.text,
+        'move_out_date': _moveOutCtrl.text.isEmpty ? null : _moveOutCtrl.text,
+        'previous_landlord': _landlordNameCtrl.text.isEmpty ? null : _landlordNameCtrl.text,
+        'landlord_contact': _landlordContactCtrl.text.isEmpty ? null : _landlordContactCtrl.text,
+        'reason_for_leaving': _reasonCtrl.text.isEmpty ? null : _reasonCtrl.text,
+        // Declaration
+        'agreed_to_declaration': _agreed,
+        'declaration_name': _signatureCtrl.text,
+        'declaration_date': _signDateCtrl.text.isEmpty ? null : _signDateCtrl.text,
+      };
+
+      final applicationId = await submitRentalApplication(applicationData);
+
+      if (applicationId == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Failed to submit application')),
+          );
+        }
+        return;
+      }
+
+      // Upload documents
+      final docs = <Map<String, String>>[];
+      final uploads = [
+        ('primary_id_front', _idFrontFile),
+        ('primary_id_back', _idBackFile),
+      ];
+
+      debugPrint('Document upload: ${uploads.where((u) => u.$2 != null).length} files to upload');
+
+      final storage = Supabase.instance.client.storage.from('listing-images');
+
+      for (final (docType, file) in uploads) {
+        if (file != null) {
+          try {
+            debugPrint('Uploading $docType: ${file.name}');
+            final bytes = await file.readAsBytes();
+            final ext = file.name.split('.').last;
+            final fileName = '${docType}_${DateTime.now().millisecondsSinceEpoch}.$ext';
+            final path = 'applications/$applicationId/$fileName';
+            await storage.uploadBinary(path, bytes);
+            final publicUrl = storage.getPublicUrl(path);
+            debugPrint('Upload success $docType: $publicUrl');
+            docs.add({
+              'document_type': docType,
+              'url': publicUrl,
+              'file_name': fileName,
+            });
+          } catch (e) {
+            debugPrint('Doc upload ($docType) failed: $e');
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Upload failed ($docType): $e'),
+                  backgroundColor: Colors.red,
+                  duration: const Duration(seconds: 4),
+                ),
+              );
+            }
+          }
+        }
+      }
+
+      if (docs.isNotEmpty) {
+        try {
+          await saveApplicationDocuments(applicationId, docs);
+          debugPrint('Saved ${docs.length} documents to application_document table');
+        } catch (e) {
+          debugPrint('saveApplicationDocuments failed: $e');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Failed to save documents: $e'),
+                backgroundColor: Colors.red,
+                duration: const Duration(seconds: 4),
+              ),
+            );
+          }
+        }
+      } else {
+        debugPrint('No documents to save (all files were null or uploads failed)');
+      }
+
+      if (mounted) {
+        showDialog(
+          context: context,
+          builder: (_) => AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            title: const Text('Application Submitted!',
+                style: TextStyle(fontWeight: FontWeight.bold)),
+            content: const Text(
+                'Your rental application has been submitted successfully. The landlord will review it within 2–3 business days.'),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(context);
+                  Navigator.pop(context, true);
+                },
+                child: const Text('OK', style: TextStyle(color: AppColors.primary)),
+              ),
+            ],
           ),
-        ],
-      ),
-    );
+        );
+      }
+    } catch (e) {
+      debugPrint('_submitApplication ERROR: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
+    }
   }
 
   static const _stepTitles = [
@@ -218,7 +340,13 @@ class _RentalApplicationScreenState extends State<RentalApplicationScreen>
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: AppColors.textPrimary),
-          onPressed: () => Navigator.pop(context),
+          onPressed: () {
+            if (_currentStep > 0) {
+              _prevStep();
+            } else {
+              Navigator.pop(context);
+            }
+          },
         ),
         title: const Text(
           'Rental Application',
@@ -313,10 +441,10 @@ class _RentalApplicationScreenState extends State<RentalApplicationScreen>
         return Step4Identity(
           idFront: _idFront,
           idBack: _idBack,
-          proofOfIncome: _proofOfIncome,
           onIdFrontPicked: (v) => setState(() => _idFront = v),
           onIdBackPicked: (v) => setState(() => _idBack = v),
-          onProofPicked: (v) => setState(() => _proofOfIncome = v),
+          onIdFrontFilePicked: (v) => setState(() => _idFrontFile = v),
+          onIdBackFilePicked: (v) => setState(() => _idBackFile = v),
           onBack: _prevStep,
           onNext: _nextStep,
         );
@@ -568,7 +696,7 @@ class CustomDropdown extends StatelessWidget {
         ),
         const SizedBox(height: 6),
         DropdownButtonFormField<String>(
-          value: value,
+          initialValue: value,
           validator: validator,
           hint: Text(hint,
               style: const TextStyle(
@@ -859,7 +987,7 @@ class Step1PersonalInfo extends StatelessWidget {
                     );
                     if (date != null) {
                       dobCtrl.text =
-                          '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}';
+                          '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
                     }
                   },
                 ),
@@ -913,6 +1041,12 @@ class Step2Employment extends StatelessWidget {
   String? _required(String? v) =>
       (v == null || v.trim().isEmpty) ? 'Required' : null;
 
+  bool get _showEmploymentFields {
+    final s = employmentStatus;
+    if (s == null) return true;
+    return s != 'Unemployed' && s != 'Student' && s != 'Retired';
+  }
+
   @override
   Widget build(BuildContext context) {
     return SingleChildScrollView(
@@ -929,54 +1063,55 @@ class Step2Employment extends StatelessWidget {
                   hint: 'Select status',
                   value: employmentStatus,
                   items: const [
-                    'Employed (Full-Time)',
-                    'Employed (Part-Time)',
+                    'Employed',
                     'Self-Employed',
                     'Freelancer',
-                    'Unemployed',
-                    'Retired',
                     'Student',
+                    'Retired',
+                    'Unemployed',
                   ],
                   onChanged: onStatusChanged,
                   validator: (v) => v == null ? 'Required' : null,
                 ),
-                const SizedBox(height: kFieldSpacing),
-                CustomTextField(
-                  label: 'Employer / Company Name',
-                  hint: 'Company Name',
-                  controller: companyCtrl,
-                  validator: _required,
-                ),
-                const SizedBox(height: kFieldSpacing),
-                CustomTextField(
-                  label: 'Personal / Job Title',
-                  hint: 'Your position',
-                  controller: jobTitleCtrl,
-                  validator: _required,
-                ),
-                const SizedBox(height: kFieldSpacing),
-                CustomTextField(
-                  label: 'Monthly Income',
-                  hint: '₱ 0',
-                  controller: incomeCtrl,
-                  keyboardType: TextInputType.number,
-                  validator: _required,
-                ),
-                const SizedBox(height: kFieldSpacing),
-                CustomTextField(
-                  label: 'Length of Employment',
-                  hint: 'e.g., 2 years',
-                  controller: lengthCtrl,
-                  validator: _required,
-                ),
-                const SizedBox(height: kFieldSpacing),
-                CustomTextField(
-                  label: 'Work Address',
-                  hint: 'Enter your work address',
-                  controller: workAddressCtrl,
-                  maxLines: 3,
-                  validator: _required,
-                ),
+                if (_showEmploymentFields) ...[
+                  const SizedBox(height: kFieldSpacing),
+                  CustomTextField(
+                    label: 'Employer / Company Name',
+                    hint: 'Company Name',
+                    controller: companyCtrl,
+                    validator: _required,
+                  ),
+                  const SizedBox(height: kFieldSpacing),
+                  CustomTextField(
+                    label: 'Personal / Job Title',
+                    hint: 'Your position',
+                    controller: jobTitleCtrl,
+                    validator: _required,
+                  ),
+                  const SizedBox(height: kFieldSpacing),
+                  CustomTextField(
+                    label: 'Monthly Income',
+                    hint: '₱ 0',
+                    controller: incomeCtrl,
+                    keyboardType: TextInputType.number,
+                    validator: _required,
+                  ),
+                  const SizedBox(height: kFieldSpacing),
+                  CustomTextField(
+                    label: 'Length of Employment',
+                    hint: 'e.g., 2 years',
+                    controller: lengthCtrl,
+                    validator: _required,
+                  ),
+                  const SizedBox(height: kFieldSpacing),
+                  CustomTextField(
+                    label: 'Work Address',
+                    hint: 'Enter your work address',
+                    controller: workAddressCtrl,
+                    maxLines: 3,
+                    validator: _required,
+                  ),
+                ],
               ],
             ),
             const SizedBox(height: 20),
@@ -1032,7 +1167,7 @@ class Step3RentalHistory extends StatelessWidget {
                   SizedBox(width: 10),
                   Expanded(
                     child: Text(
-                      'First time renting? If yes please fill the form below, if no click the next button.',
+                      'First time renting? If yes, click the next button. If no, please fill out the form below.',
                       style: TextStyle(
                         fontSize: 12.5,
                         color: Color(0xFF3A5FA0),
@@ -1079,7 +1214,7 @@ class Step3RentalHistory extends StatelessWidget {
                           );
                           if (date != null) {
                             moveInCtrl.text =
-                                '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}';
+                                '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
                           }
                         },
                       ),
@@ -1109,7 +1244,7 @@ class Step3RentalHistory extends StatelessWidget {
                           );
                           if (date != null) {
                             moveOutCtrl.text =
-                                '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}';
+                                '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
                           }
                         },
                       ),
@@ -1149,31 +1284,121 @@ class Step3RentalHistory extends StatelessWidget {
 
 // ─── STEP 4: Identity Verification ───────────────────────────────────────────
 
-class Step4Identity extends StatelessWidget {
-  final String? idFront, idBack, proofOfIncome;
-  final ValueChanged<String?> onIdFrontPicked, onIdBackPicked, onProofPicked;
+class Step4Identity extends StatefulWidget {
+  final String? idFront, idBack;
+  final ValueChanged<String?> onIdFrontPicked, onIdBackPicked;
+  final ValueChanged<XFile?> onIdFrontFilePicked, onIdBackFilePicked;
   final VoidCallback onBack, onNext;
 
   const Step4Identity({
     super.key,
     required this.idFront,
     required this.idBack,
-    required this.proofOfIncome,
     required this.onIdFrontPicked,
     required this.onIdBackPicked,
-    required this.onProofPicked,
+    required this.onIdFrontFilePicked,
+    required this.onIdBackFilePicked,
     required this.onBack,
     required this.onNext,
   });
 
-  void _simulatePick(BuildContext context, ValueChanged<String?> onPicked) {
-    final names = [
-      'document_scan.pdf',
-      'id_photo.jpg',
-      'proof.png',
-      'file_upload.pdf'
-    ];
-    onPicked(names[DateTime.now().millisecond % names.length]);
+  @override
+  State<Step4Identity> createState() => _Step4IdentityState();
+}
+
+class _Step4IdentityState extends State<Step4Identity> {
+  XFile? _previewFile;
+
+  Future<void> _pickImage(
+      ValueChanged<String?> onName, ValueChanged<XFile?> onFile) async {
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (_) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            Container(
+              width: 40, height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey[300],
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.camera_alt_rounded, color: AppColors.primary),
+              title: const Text('Take a Photo'),
+              onTap: () => Navigator.pop(context, ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_rounded, color: AppColors.primary),
+              title: const Text('Choose from Gallery'),
+              onTap: () => Navigator.pop(context, ImageSource.gallery),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (source == null) return;
+
+    final picker = ImagePicker();
+    final picked = await picker.pickImage(source: source, imageQuality: 85);
+    if (picked != null) {
+      onName(picked.name);
+      onFile(picked);
+      // Show preview
+      setState(() => _previewFile = picked);
+      if (mounted) {
+        await showDialog(
+          context: context,
+          builder: (_) => Dialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxHeight: MediaQuery.of(context).size.height * 0.5,
+                  ),
+                  child: ClipRRect(
+                    borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
+                    child: Image.file(
+                      File(picked.path),
+                      fit: BoxFit.contain,
+                      width: double.infinity,
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          picked.name,
+                          style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text('OK', style: TextStyle(color: AppColors.primary)),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      }
+    }
   }
 
   @override
@@ -1208,7 +1433,7 @@ class Step4Identity extends StatelessWidget {
                 ),
                 const SizedBox(height: 6),
                 const Text(
-                  'Please upload the required documents for verification',
+                  'Please upload or capture the required documents for verification',
                   style: TextStyle(
                     fontSize: 12.5,
                     color: AppColors.textSecondary,
@@ -1217,30 +1442,22 @@ class Step4Identity extends StatelessWidget {
                 const SizedBox(height: 20),
                 UploadCard(
                   title: 'Valid ID (Front)',
-                  subtitle: 'Upload a clear photo of your government-issued ID',
-                  fileName: idFront,
-                  onChoose: () => _simulatePick(context, onIdFrontPicked),
+                  subtitle: 'Upload or capture a clear photo of your government-issued ID',
+                  fileName: widget.idFront,
+                  onChoose: () => _pickImage(widget.onIdFrontPicked, widget.onIdFrontFilePicked),
                 ),
                 const SizedBox(height: 14),
                 UploadCard(
                   title: 'Valid ID (Back)',
-                  subtitle: 'Upload the back side of your ID',
-                  fileName: idBack,
-                  onChoose: () => _simulatePick(context, onIdBackPicked),
-                ),
-                const SizedBox(height: 14),
-                UploadCard(
-                  title: 'Proof of Income',
-                  subtitle:
-                      'Latest payslip, ITR, or Certificate of Employment',
-                  fileName: proofOfIncome,
-                  onChoose: () => _simulatePick(context, onProofPicked),
+                  subtitle: 'Upload or capture the back side of your ID',
+                  fileName: widget.idBack,
+                  onChoose: () => _pickImage(widget.onIdBackPicked, widget.onIdBackFilePicked),
                 ),
               ],
             ),
           ),
           const SizedBox(height: 20),
-          _BottomButtons(onBack: onBack, onNext: onNext),
+          _BottomButtons(onBack: widget.onBack, onNext: widget.onNext),
         ],
       ),
     );
@@ -1249,7 +1466,7 @@ class Step4Identity extends StatelessWidget {
 
 // ─── STEP 5: Declaration & Consent ───────────────────────────────────────────
 
-class Step5Declaration extends StatelessWidget {
+class Step5Declaration extends StatefulWidget {
   final GlobalKey<FormState> formKey;
   final bool agreed;
   final ValueChanged<bool?> onAgreedChanged;
@@ -1267,15 +1484,30 @@ class Step5Declaration extends StatelessWidget {
     required this.onSubmit,
   });
 
+  @override
+  State<Step5Declaration> createState() => _Step5DeclarationState();
+}
+
+class _Step5DeclarationState extends State<Step5Declaration> {
+  final List<List<Offset>> _strokes = [];
+  List<Offset> _currentStroke = [];
+
   String? _required(String? v) =>
       (v == null || v.trim().isEmpty) ? 'Required' : null;
+
+  void _clearSignature() {
+    setState(() {
+      _strokes.clear();
+      _currentStroke = [];
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
       child: Form(
-        key: formKey,
+        key: widget.formKey,
         child: Column(
           children: [
             Container(
@@ -1320,7 +1552,7 @@ class Step5Declaration extends StatelessWidget {
                   ),
                   const SizedBox(height: 16),
                   GestureDetector(
-                    onTap: () => onAgreedChanged(!agreed),
+                    onTap: () => widget.onAgreedChanged(!widget.agreed),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -1328,8 +1560,8 @@ class Step5Declaration extends StatelessWidget {
                           width: 22,
                           height: 22,
                           child: Checkbox(
-                            value: agreed,
-                            onChanged: onAgreedChanged,
+                            value: widget.agreed,
+                            onChanged: widget.onAgreedChanged,
                             activeColor: AppColors.primary,
                             shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(4)),
@@ -1353,16 +1585,85 @@ class Step5Declaration extends StatelessWidget {
                   ),
                   const SizedBox(height: 20),
                   CustomTextField(
-                    label: 'Digital Signature (Full Name)',
-                    hint: 'Full name',
-                    controller: signatureCtrl,
+                    label: 'Full Name',
+                    hint: 'Full name as signature',
+                    controller: widget.signatureCtrl,
                     validator: _required,
+                  ),
+                  const SizedBox(height: kFieldSpacing),
+                  // E-Signature pad
+                  RichText(
+                    text: const TextSpan(
+                      text: 'E-Signature',
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textSecondary,
+                        letterSpacing: 0.1,
+                      ),
+                      children: [
+                        TextSpan(
+                          text: ' *',
+                          style: TextStyle(color: AppColors.primary),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  GestureDetector(
+                    onPanStart: (d) {
+                      setState(() {
+                        _currentStroke = [d.localPosition];
+                        _strokes.add(_currentStroke);
+                      });
+                    },
+                    onPanUpdate: (d) {
+                      setState(() {
+                        _currentStroke.add(d.localPosition);
+                      });
+                    },
+                    onPanEnd: (_) {
+                      setState(() {
+                        _currentStroke = [];
+                      });
+                    },
+                    child: Container(
+                      height: 150,
+                      width: double.infinity,
+                      decoration: BoxDecoration(
+                        color: AppColors.inputFill,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: AppColors.border),
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(10),
+                        child: CustomPaint(
+                          painter: _SignaturePainter(
+                            strokes: _strokes,
+                            color: AppColors.textPrimary,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton.icon(
+                      onPressed: _clearSignature,
+                      icon: const Icon(Icons.refresh_rounded, size: 16),
+                      label: const Text('Clear'),
+                      style: TextButton.styleFrom(
+                        foregroundColor: AppColors.textSecondary,
+                        textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                      ),
+                    ),
                   ),
                   const SizedBox(height: kFieldSpacing),
                   CustomTextField(
                     label: 'Date',
-                    hint: 'dd/mm/yyyy',
-                    controller: dateCtrl,
+                    hint: 'yyyy-mm-dd',
+                    controller: widget.dateCtrl,
                     readOnly: true,
                     suffixIcon: const Icon(Icons.calendar_today_rounded,
                         size: 16, color: AppColors.textSecondary),
@@ -1382,8 +1683,8 @@ class Step5Declaration extends StatelessWidget {
                         ),
                       );
                       if (date != null) {
-                        dateCtrl.text =
-                            '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}';
+                        widget.dateCtrl.text =
+                            '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
                       }
                     },
                   ),
@@ -1424,7 +1725,7 @@ class Step5Declaration extends StatelessWidget {
                 Expanded(
                   child: CustomButton(
                     label: 'Back',
-                    onPressed: onBack,
+                    onPressed: widget.onBack,
                     outlined: true,
                   ),
                 ),
@@ -1433,7 +1734,7 @@ class Step5Declaration extends StatelessWidget {
                   flex: 2,
                   child: CustomButton(
                     label: 'Submit Application',
-                    onPressed: onSubmit,
+                    onPressed: widget.onSubmit,
                   ),
                 ),
               ],
@@ -1474,4 +1775,44 @@ class _BottomButtons extends StatelessWidget {
       ],
     );
   }
+}
+
+// ─── Signature Canvas Painter ─────────────────────────────────────────────────
+
+class _SignaturePainter extends CustomPainter {
+  final List<List<Offset>> strokes;
+  final Color color;
+
+  _SignaturePainter({required this.strokes, required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.5;
+
+    for (final stroke in strokes) {
+      if (stroke.length < 2) {
+        if (stroke.length == 1) {
+          canvas.drawCircle(stroke.first, 1.25, paint..style = PaintingStyle.fill);
+          paint.style = PaintingStyle.stroke;
+        }
+        continue;
+      }
+      final path = ui.Path()..moveTo(stroke.first.dx, stroke.first.dy);
+      for (int i = 1; i < stroke.length; i++) {
+        final p0 = stroke[i - 1];
+        final p1 = stroke[i];
+        final mid = Offset((p0.dx + p1.dx) / 2, (p0.dy + p1.dy) / 2);
+        path.quadraticBezierTo(p0.dx, p0.dy, mid.dx, mid.dy);
+      }
+      canvas.drawPath(path, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _SignaturePainter old) => true;
 }

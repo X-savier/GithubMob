@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'profile_screen.dart';
 import 'unit_details.dart';
 import 'filter_widget.dart';
+import 'property_data.dart';
 
 class SearchFieldScreen extends StatefulWidget {
   const SearchFieldScreen({super.key});
@@ -14,6 +16,45 @@ class _SearchFieldScreenState extends State<SearchFieldScreen> {
   int _selectedIndex = 1;
   int selectedCategory = 0;
   Map<String, dynamic> currentFilters = {};
+  bool _showMap = false;
+  String _searchQuery = '';
+  final TextEditingController _searchController = TextEditingController();
+
+  double? userLat;
+  double? userLng;
+  GoogleMapController? _mapController;
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadData();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadData() async {
+    try {
+      if (allProperties.isEmpty) {
+        await fetchProperties();
+      }
+    } catch (e) {
+      debugPrint('SearchField _loadData error: $e');
+    }
+    final pos = await getUserLocation();
+    if (mounted) {
+      setState(() {
+        userLat = pos?.latitude ?? 14.3270;
+        userLng = pos?.longitude ?? 120.9540;
+        computeDistances(allProperties, userLat!, userLng!);
+        _isLoading = false;
+      });
+    }
+  }
 
   void updateCategory(int category) {
     setState(() {
@@ -29,7 +70,7 @@ class _SearchFieldScreenState extends State<SearchFieldScreen> {
     if (filters['bedrooms'] > 0) message += '${filters['bedrooms']} bed, ';
     if (filters['bathrooms'] > 0) message += '${filters['bathrooms']} bath, ';
     message += '${filters['minArea']}-${filters['maxArea']}m²';
-    
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
@@ -38,24 +79,93 @@ class _SearchFieldScreenState extends State<SearchFieldScreen> {
     );
   }
 
+  List<Property> get _filteredProperties {
+    List<Property> props = propertiesByCategory(selectedCategory);
+    props = props.where((p) => passesFilters(p, currentFilters)).toList();
+    if (_searchQuery.isNotEmpty) {
+      final q = _searchQuery.toLowerCase();
+      props = props
+          .where((p) =>
+              p.title.toLowerCase().contains(q) ||
+              p.location.toLowerCase().contains(q))
+          .toList();
+    }
+    final sortBy = currentFilters['sortBy'];
+    if (sortBy != null && sortBy != 'Any') {
+      sortProperties(props, sortBy);
+    }
+    return props;
+  }
+
+  List<Property> get _propertiesWithinRadius {
+    return _filteredProperties
+        .where((p) => p.distanceKm != null && p.distanceKm! <= 5.0)
+        .toList();
+  }
+
+  Set<Marker> get _markers {
+    final props = _filteredProperties;
+    return props.map((p) {
+      final isWithinRadius = p.distanceKm != null && p.distanceKm! <= 5.0;
+      return Marker(
+        markerId: MarkerId(p.title),
+        position: LatLng(p.lat, p.lng),
+        icon: BitmapDescriptor.defaultMarkerWithHue(
+          isWithinRadius
+              ? BitmapDescriptor.hueRed
+              : BitmapDescriptor.hueOrange,
+        ),
+        infoWindow: InfoWindow(
+          title: p.title,
+          snippet:
+              '${p.price} • ${p.distanceKm?.toStringAsFixed(1) ?? "?"} km away',
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => UnitDetailsScreen(
+                  property: p,
+                ),
+              ),
+            );
+          },
+        ),
+      );
+    }).toSet();
+  }
+
+  Set<Circle> get _radiusCircles {
+    if (userLat == null || userLng == null) return {};
+    return {
+      Circle(
+        circleId: const CircleId('user_5km_radius'),
+        center: LatLng(userLat!, userLng!),
+        radius: 5000, // 5 km in meters
+        fillColor: const Color(0xfff36c6c).withOpacity(0.08),
+        strokeColor: const Color(0xfff36c6c),
+        strokeWidth: 2,
+      ),
+    };
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xfff5f5f5),
       appBar: AppBar(
-        backgroundColor: Colors.transparent,
+        backgroundColor: const Color(0xfff36c6c),
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.black87),
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
           onPressed: () => Navigator.pop(context),
         ),
         title: const Text(
           "Search",
-          style: TextStyle(color: Colors.black87, fontWeight: FontWeight.bold),
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.favorite_border, color: Colors.black87),
+            icon: const Icon(Icons.favorite_border, color: Colors.white),
             onPressed: () {
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
@@ -66,7 +176,7 @@ class _SearchFieldScreenState extends State<SearchFieldScreen> {
             },
           ),
           IconButton(
-            icon: const Icon(Icons.notifications_none, color: Colors.black87),
+            icon: const Icon(Icons.notifications_none, color: Colors.white),
             onPressed: () {
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
@@ -78,148 +188,167 @@ class _SearchFieldScreenState extends State<SearchFieldScreen> {
           ),
         ],
       ),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          child: Column(
-            children: [
-              // Search Section
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  children: [
-                    // Search Bar
-                    Container(
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(30),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.grey.withOpacity(0.1),
-                            spreadRadius: 1,
-                            blurRadius: 5,
-                            offset: const Offset(0, 2),
-                          ),
-                        ],
-                      ),
-                      child: TextField(
-                        decoration: InputDecoration(
-                          hintText: "Search location and property",
-                          prefixIcon: const Icon(Icons.search, color: Colors.grey),
-                          border: InputBorder.none,
-                          contentPadding: const EdgeInsets.symmetric(vertical: 15),
-                        ),
-                        onSubmitted: (value) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text('Searching for: $value'),
-                              backgroundColor: const Color(0xfff36c6c),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-
-                    const SizedBox(height: 16),
-
-                    // Filter and Map Row
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            onPressed: () {
-                              showModalBottomSheet(
-                                context: context,
-                                isScrollControlled: true,
-                                backgroundColor: Colors.transparent,
-                                builder: (context) => FilterWidget(
-                                  onApplyFilters: applyFilters,
-                                ),
-                              );
-                            },
-                            icon: const Icon(Icons.filter_list, size: 18),
-                            label: const Text("Filter"),
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: Colors.black87,
-                              side: const BorderSide(color: Colors.grey),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(20),
-                              ),
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: ElevatedButton.icon(
-                            onPressed: () {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('Map view coming soon!'),
-                                  backgroundColor: Color(0xfff36c6c),
-                                ),
-                              );
-                            },
-                            icon: const Icon(Icons.map_outlined, size: 18),
-                            label: const Text("Map"),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xfff36c6c),
-                              foregroundColor: Colors.white,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(20),
-                              ),
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                            ),
-                          ),
+      body: _isLoading
+          ? const Center(
+              child: CircularProgressIndicator(
+                color: Color(0xfff36c6c),
+              ),
+            )
+          : SafeArea(
+        child: Column(
+          children: [
+            // Search Section
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                children: [
+                  // Search Bar
+                  Container(
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(30),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.grey.withOpacity(0.1),
+                          spreadRadius: 1,
+                          blurRadius: 5,
+                          offset: const Offset(0, 2),
                         ),
                       ],
                     ),
-                  ],
-                ),
+                    child: TextField(
+                      controller: _searchController,
+                      decoration: const InputDecoration(
+                        hintText: "Search location or property...",
+                        prefixIcon: Icon(Icons.search, color: Colors.grey),
+                        border: InputBorder.none,
+                        contentPadding: EdgeInsets.symmetric(vertical: 15),
+                      ),
+                      onChanged: (value) {
+                        setState(() {
+                          _searchQuery = value;
+                        });
+                      },
+                    ),
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // Filter and Map Row
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () {
+                            showModalBottomSheet(
+                              context: context,
+                              isScrollControlled: true,
+                              backgroundColor: Colors.transparent,
+                              builder: (context) => FilterWidget(
+                                onApplyFilters: applyFilters,
+                              ),
+                            );
+                          },
+                          icon: const Icon(Icons.filter_list, size: 18),
+                          label: const Text("Filter"),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.black87,
+                            side: const BorderSide(color: Colors.grey),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: () {
+                            setState(() {
+                              _showMap = !_showMap;
+                            });
+                          },
+                          icon: Icon(
+                              _showMap ? Icons.list : Icons.map_outlined,
+                              size: 18),
+                          label: Text(_showMap ? "List" : "Map"),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xfff36c6c),
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ),
+            ),
 
-              // Category Section
-              SearchCategorySection(
-                selectedCategory: selectedCategory,
-                onCategorySelected: updateCategory,
-              ),
-
-              const SizedBox(height: 16),
-
-              // Found Properties Count
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Row(
-                  children: [
-                    Text(
-                      _getFoundPropertiesText(),
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.black87,
+            // Found count
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Row(
+                children: [
+                  Text(
+                    "Found ${_filteredProperties.length} Properties",
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black87,
+                    ),
+                  ),
+                  const Spacer(),
+                  if (userLat != null)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: const Color(0xfff36c6c).withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.near_me,
+                              size: 14, color: Color(0xfff36c6c)),
+                          const SizedBox(width: 4),
+                          Text(
+                            '${_propertiesWithinRadius.length} within 5 km',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: Color(0xfff36c6c),
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                  ],
-                ),
+                ],
               ),
+            ),
 
-              const SizedBox(height: 16),
+            const SizedBox(height: 12),
 
-              // Property List
-              SearchPropertyList(
-                selectedCategory: selectedCategory,
-                filters: currentFilters,
-              ),
-            ],
-          ),
+            // Map or List
+            Expanded(
+              child: _showMap ? _buildMapView() : _buildListView(),
+            ),
+          ],
         ),
       ),
-
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _selectedIndex,
         selectedItemColor: const Color(0xfff36c6c),
         unselectedItemColor: Colors.grey,
-        selectedIconTheme: const IconThemeData(color: Color(0xfff36c6c), size: 28),
-        unselectedIconTheme: const IconThemeData(color: Colors.grey, size: 24),
+        selectedIconTheme:
+            const IconThemeData(color: Color(0xfff36c6c), size: 28),
+        unselectedIconTheme:
+            const IconThemeData(color: Colors.grey, size: 24),
         selectedLabelStyle: const TextStyle(fontWeight: FontWeight.bold),
         type: BottomNavigationBarType.fixed,
         items: const [
@@ -248,7 +377,7 @@ class _SearchFieldScreenState extends State<SearchFieldScreen> {
           setState(() {
             _selectedIndex = index;
           });
-          
+
           if (index == 0) {
             Navigator.pop(context);
           } else if (index == 2) {
@@ -264,7 +393,8 @@ class _SearchFieldScreenState extends State<SearchFieldScreen> {
           } else if (index == 3) {
             Navigator.push(
               context,
-              MaterialPageRoute(builder: (context) => const ProfileScreen()),
+              MaterialPageRoute(
+                  builder: (context) => const ProfileScreen()),
             ).then((_) {
               setState(() {
                 _selectedIndex = 1;
@@ -276,47 +406,119 @@ class _SearchFieldScreenState extends State<SearchFieldScreen> {
     );
   }
 
-  String _getFoundPropertiesText() {
-    int count = getFilteredPropertiesForCategory(selectedCategory).length;
-    switch (selectedCategory) {
-      case 1:
-        return "Found $count Studio Apartments";
-      case 2:
-        return "Found $count 1 Bedroom Properties";
-      case 3:
-        return "Found $count 2 Bedroom Properties";
-      case 4:
-        return "Found $count 3+ Bedroom Properties";
-      default:
-        return "Found $count Properties";
-    }
+  Widget _buildMapView() {
+    final center = (userLat != null && userLng != null)
+        ? LatLng(userLat!, userLng!)
+        : const LatLng(14.3270, 120.9540);
+
+    return Stack(
+      children: [
+        GoogleMap(
+          initialCameraPosition: CameraPosition(
+            target: center,
+            zoom: 13, // Shows the full 5 km radius
+          ),
+          markers: _markers,
+          circles: _radiusCircles,
+          myLocationEnabled: true,
+          myLocationButtonEnabled: true,
+          zoomControlsEnabled: true,
+          onMapCreated: (controller) {
+            _mapController = controller;
+          },
+        ),
+        // Legend overlay
+        Positioned(
+          bottom: 16,
+          left: 16,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.15),
+                  blurRadius: 6,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 10,
+                      height: 10,
+                      decoration: const BoxDecoration(
+                        color: Colors.red,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    const Text('Within 5 km',
+                        style: TextStyle(fontSize: 11)),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 10,
+                      height: 10,
+                      decoration: const BoxDecoration(
+                        color: Colors.orange,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    const Text('Beyond 5 km',
+                        style: TextStyle(fontSize: 11)),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
   }
-}
 
-////////////////////////////////////////////////////////
-/// PROPERTY MODEL
-////////////////////////////////////////////////////////
+  Widget _buildListView() {
+    final props = _filteredProperties;
+    if (props.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.filter_alt_off, size: 60, color: Colors.grey[400]),
+            const SizedBox(height: 10),
+            Text(
+              'No properties match your search',
+              style: TextStyle(fontSize: 16, color: Colors.grey[600]),
+            ),
+          ],
+        ),
+      );
+    }
 
-class SearchProperty {
-  final String image;
-  final String title;
-  final String location;
-  final String price;
-  final int beds;
-  final String baths;
-  final String area;
-  final String? label;
-
-  SearchProperty({
-    required this.image,
-    required this.title,
-    required this.location,
-    required this.price,
-    required this.beds,
-    required this.baths,
-    required this.area,
-    this.label,
-  });
+    return ListView.builder(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      itemCount: props.length,
+      itemBuilder: (context, index) {
+        final property = props[index];
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 16),
+          child: _SearchPropertyCard(property: property),
+        );
+      },
+    );
+  }
 }
 
 ////////////////////////////////////////////////////////
@@ -351,20 +553,12 @@ class SearchCategorySection extends StatelessWidget {
     );
   }
 
-  Widget _buildCategoryButton(BuildContext context, String text, int index) {
+  Widget _buildCategoryButton(
+      BuildContext context, String text, int index) {
     bool isActive = selectedCategory == index;
-    
+
     return GestureDetector(
-      onTap: () {
-        onCategorySelected(index);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Showing: $text'),
-            backgroundColor: const Color(0xfff36c6c),
-            duration: const Duration(milliseconds: 500),
-          ),
-        );
-      },
+      onTap: () => onCategorySelected(index),
       child: Container(
         margin: const EdgeInsets.only(right: 10),
         padding: const EdgeInsets.symmetric(horizontal: 15),
@@ -387,258 +581,13 @@ class SearchCategorySection extends StatelessWidget {
 }
 
 ////////////////////////////////////////////////////////
-/// SEARCH PROPERTY DATA
+/// SEARCH PROPERTY CARD
 ////////////////////////////////////////////////////////
 
-// STUDIO APARTMENTS
-final List<SearchProperty> studioProperties = [
-  SearchProperty(
-    image: "assets/images/property1.jpg",
-    title: "Modern Studio Apartment",
-    location: "Makati City, Metro Manila",
-    price: "P2,000/month",
-    beds: 1,
-    baths: "1",
-    area: "25m²",
-    label: "Popular",
-  ),
-  SearchProperty(
-    image: "assets/images/property3.jpg",
-    title: "Cozy Studio Loft",
-    location: "Makati City",
-    price: "P3,000/month",
-    beds: 1,
-    baths: "1",
-    area: "30m²",
-  ),
-  SearchProperty(
-    image: "assets/images/property8.jpg",
-    title: "Minimalist Studio",
-    location: "BGC, Taguig",
-    price: "P3,200/month",
-    beds: 1,
-    baths: "1",
-    area: "28m²",
-    label: "New",
-  ),
-];
+class _SearchPropertyCard extends StatelessWidget {
+  final Property property;
 
-// 1 BEDROOM PROPERTIES
-final List<SearchProperty> oneBedroomProperties = [
-  SearchProperty(
-    image: "assets/images/property4.jpg",
-    title: "1BR Modern Unit",
-    location: "Pasig City",
-    price: "P2,850/month",
-    beds: 1,
-    baths: "1",
-    area: "35m²",
-    label: "Popular",
-  ),
-  SearchProperty(
-    image: "assets/images/property9.jpg",
-    title: "1BR with Balcony",
-    location: "Makati City",
-    price: "P3,500/month",
-    beds: 1,
-    baths: "1",
-    area: "40m²",
-  ),
-  SearchProperty(
-    image: "assets/images/property10.jpg",
-    title: "1BR Executive Suite",
-    location: "Ortigas Center",
-    price: "P4,000/month",
-    beds: 1,
-    baths: "1",
-    area: "45m²",
-  ),
-];
-
-// 2 BEDROOM PROPERTIES
-final List<SearchProperty> twoBedroomProperties = [
-  SearchProperty(
-    image: "assets/images/property2.jpg",
-    title: "Spacious 2BR Condo",
-    location: "BGC, Taguig",
-    price: "P4,500/month",
-    beds: 2,
-    baths: "2",
-    area: "65m²",
-    label: "Featured",
-  ),
-  SearchProperty(
-    image: "assets/images/property5.jpg",
-    title: "2BR Family Home",
-    location: "Quezon City",
-    price: "P3,500/month",
-    beds: 2,
-    baths: "2",
-    area: "50m²",
-  ),
-  SearchProperty(
-    image: "assets/images/property11.jpg",
-    title: "2BR Garden Unit",
-    location: "Pasay City",
-    price: "P4,200/month",
-    beds: 2,
-    baths: "2",
-    area: "55m²",
-  ),
-];
-
-// 3+ BEDROOM PROPERTIES
-final List<SearchProperty> threePlusBedroomProperties = [
-  SearchProperty(
-    image: "assets/images/property6.jpg",
-    title: "3BR Townhouse",
-    location: "Mandaluyong",
-    price: "P5,500/month",
-    beds: 3,
-    baths: "2",
-    area: "85m²",
-    label: "Popular",
-  ),
-  SearchProperty(
-    image: "assets/images/property7.jpg",
-    title: "4BR Villa",
-    location: "Alabang",
-    price: "P8,000/month",
-    beds: 4,
-    baths: "3",
-    area: "120m²",
-    label: "Luxury",
-  ),
-  SearchProperty(
-    image: "assets/images/property13.jpg",
-    title: "3BR Duplex",
-    location: "Quezon City",
-    price: "P6,200/month",
-    beds: 3,
-    baths: "2",
-    area: "90m²",
-  ),
-];
-
-List<SearchProperty> getAllProperties() {
-  return [
-    studioProperties[0],
-    oneBedroomProperties[0],
-    twoBedroomProperties[0],
-    threePlusBedroomProperties[0],
-  ];
-}
-
-bool passesSearchFilters(SearchProperty property, Map<String, dynamic> filters) {
-  if (filters.isEmpty) return true;
-  
-  if (filters.containsKey('bedrooms') && filters['bedrooms'] > 0) {
-    if (property.beds != filters['bedrooms']) return false;
-  }
-  
-  if (filters.containsKey('bathrooms') && filters['bathrooms'] > 0) {
-    int propBaths = int.tryParse(property.baths) ?? 0;
-    if (propBaths != filters['bathrooms']) return false;
-  }
-  
-  if (filters.containsKey('minArea') && filters.containsKey('maxArea')) {
-    int propArea = int.tryParse(property.area.replaceAll('m²', '')) ?? 0;
-    if (propArea < filters['minArea'] || propArea > filters['maxArea']) return false;
-  }
-  
-  if (filters.containsKey('city') && filters['city'] != 'Any') {
-    if (!property.location.contains(filters['city'])) return false;
-  }
-  
-  return true;
-}
-
-List<SearchProperty> getFilteredPropertiesForCategory(int category) {
-  List<SearchProperty> props;
-  switch (category) {
-    case 1:
-      props = studioProperties;
-      break;
-    case 2:
-      props = oneBedroomProperties;
-      break;
-    case 3:
-      props = twoBedroomProperties;
-      break;
-    case 4:
-      props = threePlusBedroomProperties;
-      break;
-    default:
-      props = getAllProperties();
-  }
-  return props;
-}
-
-////////////////////////////////////////////////////////
-/// SEARCH PROPERTY LIST
-////////////////////////////////////////////////////////
-
-class SearchPropertyList extends StatelessWidget {
-  final int selectedCategory;
-  final Map<String, dynamic> filters;
-
-  const SearchPropertyList({
-    super.key,
-    required this.selectedCategory,
-    required this.filters,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    List<SearchProperty> allProps = getFilteredPropertiesForCategory(selectedCategory);
-    List<SearchProperty> filteredProps = allProps.where((p) => passesSearchFilters(p, filters)).toList();
-
-    if (filteredProps.isEmpty) {
-      return Padding(
-        padding: const EdgeInsets.all(30),
-        child: Center(
-          child: Column(
-            children: [
-              Icon(Icons.filter_alt_off, size: 60, color: Colors.grey[400]),
-              const SizedBox(height: 10),
-              Text(
-                'No properties match your filters',
-                style: TextStyle(fontSize: 16, color: Colors.grey[600]),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Try adjusting your filter criteria',
-                style: TextStyle(fontSize: 13, color: Colors.grey[500]),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Column(
-        children: filteredProps.map((property) {
-          return Column(
-            children: [
-              SearchPropertyCard(property: property),
-              const SizedBox(height: 16),
-            ],
-          );
-        }).toList(),
-      ),
-    );
-  }
-}
-
-class SearchPropertyCard extends StatelessWidget {
-  final SearchProperty property;
-
-  const SearchPropertyCard({
-    super.key,
-    required this.property,
-  });
+  const _SearchPropertyCard({required this.property});
 
   @override
   Widget build(BuildContext context) {
@@ -648,13 +597,7 @@ class SearchPropertyCard extends StatelessWidget {
           context,
           MaterialPageRoute(
             builder: (context) => UnitDetailsScreen(
-              image: property.image,
-              title: property.title,
-              location: property.location,
-              price: property.price.replaceAll('P', ''),
-              beds: property.beds.toString(),
-              baths: property.baths,
-              area: property.area,
+              property: property,
             ),
           ),
         );
@@ -679,44 +622,25 @@ class SearchPropertyCard extends StatelessWidget {
               children: [
                 ClipRRect(
                   borderRadius: const BorderRadius.vertical(
-                    top: Radius.circular(15),
-                  ),
-                  child: Image.asset(
-                    property.image,
-                    height: 180,
-                    width: double.infinity,
-                    fit: BoxFit.cover,
-                    errorBuilder: (context, error, stackTrace) {
-                      return Container(
-                        height: 180,
-                        color: Colors.grey[300],
-                        child: const Center(
-                          child: Icon(
-                            Icons.broken_image,
-                            size: 50,
-                            color: Colors.grey,
-                          ),
-                        ),
-                      );
-                    },
-                  ),
+                      top: Radius.circular(15)),
+                  child: _buildImage(property.image, 180),
                 ),
-                if (property.label != null && property.label!.isNotEmpty)
+                if (property.label != null &&
+                    property.label!.isNotEmpty)
                   Positioned(
                     top: 10,
                     left: 10,
                     child: Container(
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 5,
-                      ),
+                          horizontal: 10, vertical: 5),
                       decoration: BoxDecoration(
                         color: const Color(0xfff36c6c),
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Text(
                         property.label!,
-                        style: const TextStyle(color: Colors.white, fontSize: 12),
+                        style: const TextStyle(
+                            color: Colors.white, fontSize: 12),
                       ),
                     ),
                   ),
@@ -727,7 +651,8 @@ class SearchPropertyCard extends StatelessWidget {
                     onTap: () {
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
-                          content: Text('${property.title} added to favorites'),
+                          content: Text(
+                              '${property.title} added to favorites'),
                           backgroundColor: const Color(0xfff36c6c),
                         ),
                       );
@@ -738,11 +663,8 @@ class SearchPropertyCard extends StatelessWidget {
                         color: Colors.white.withOpacity(0.9),
                         shape: BoxShape.circle,
                       ),
-                      child: const Icon(
-                        Icons.favorite_border,
-                        size: 18,
-                        color: Color(0xfff36c6c),
-                      ),
+                      child: const Icon(Icons.favorite_border,
+                          size: 18, color: Color(0xfff36c6c)),
                     ),
                   ),
                 ),
@@ -756,22 +678,33 @@ class SearchPropertyCard extends StatelessWidget {
                   Text(
                     property.title,
                     style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
-                    ),
+                        fontWeight: FontWeight.bold, fontSize: 16),
                   ),
                   const SizedBox(height: 4),
                   Row(
                     children: [
-                      Icon(Icons.location_on, size: 14, color: Colors.grey[600]),
+                      Icon(Icons.location_on,
+                          size: 14, color: Colors.grey[600]),
                       const SizedBox(width: 4),
                       Expanded(
                         child: Text(
                           property.location,
-                          style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+                          style: TextStyle(
+                              fontSize: 13, color: Colors.grey[600]),
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
+                      if (property.distanceKm != null) ...[
+                        const SizedBox(width: 6),
+                        Text(
+                          "${property.distanceKm!.toStringAsFixed(1)} km",
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey[600],
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                   const SizedBox(height: 8),
@@ -786,11 +719,14 @@ class SearchPropertyCard extends StatelessWidget {
                   const SizedBox(height: 8),
                   Row(
                     children: [
-                      _buildInfoChip(Icons.bed, property.beds.toString(), 'Bed'),
+                      _buildInfoChip(
+                          Icons.bed, property.beds.toString(), 'Bed'),
                       const SizedBox(width: 8),
-                      _buildInfoChip(Icons.bathtub, property.baths, 'Bath'),
+                      _buildInfoChip(
+                          Icons.bathtub, property.baths, 'Bath'),
                       const SizedBox(width: 8),
-                      _buildInfoChip(Icons.square_foot, property.area, ''),
+                      _buildInfoChip(
+                          Icons.square_foot, property.area, ''),
                     ],
                   ),
                 ],
@@ -802,7 +738,8 @@ class SearchPropertyCard extends StatelessWidget {
     );
   }
 
-  Widget _buildInfoChip(IconData icon, String value, String label) {
+  Widget _buildInfoChip(
+      IconData icon, String value, String label) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
@@ -818,6 +755,54 @@ class SearchPropertyCard extends StatelessWidget {
             label.isEmpty ? value : '$value $label',
             style: const TextStyle(fontSize: 12),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildImage(String imageSource, double height) {
+    final isUrl = imageSource.startsWith('http://') ||
+        imageSource.startsWith('https://');
+
+    if (isUrl) {
+      return Image.network(
+        imageSource,
+        height: height,
+        width: double.infinity,
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) {
+          return _imagePlaceholder(height);
+        },
+      );
+    }
+
+    if (imageSource.isNotEmpty) {
+      return Image.asset(
+        imageSource,
+        height: height,
+        width: double.infinity,
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) {
+          return _imagePlaceholder(height);
+        },
+      );
+    }
+
+    return _imagePlaceholder(height);
+  }
+
+  Widget _imagePlaceholder(double height) {
+    return Container(
+      height: height,
+      width: double.infinity,
+      color: Colors.grey[300],
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.apartment, size: 50, color: Colors.grey[500]),
+          const SizedBox(height: 4),
+          Text('No Photo',
+              style: TextStyle(color: Colors.grey[500], fontSize: 12)),
         ],
       ),
     );

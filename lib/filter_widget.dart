@@ -16,7 +16,6 @@ class _FilterWidgetState extends State<FilterWidget> {
   // Dropdown selections
   String selectedSortBy = 'Any';
   String selectedPropertyType = 'Any';
-  String selectedCity = 'Any';
   String selectedFurnishing = 'Any';
   String selectedPetPolicy = 'Any';
   String selectedSmokingPolicy = 'Any';
@@ -27,12 +26,11 @@ class _FilterWidgetState extends State<FilterWidget> {
   double minArea = 0;
   double maxArea = 200;
 
-  final List<String> sortByOptions = ['Any', 'Price: Low to High', 'Price: High to Low', 'Newest', 'Popular'];
-  final List<String> propertyTypeOptions = ['Any', 'Apartment', 'House', 'Condo', 'Studio', 'Townhouse'];
-  final List<String> cityOptions = ['Any', 'Makati City', 'Manila', 'Quezon City', 'Taguig', 'Pasig', 'Mandaluyong'];
+  final List<String> sortByOptions = ['Any', 'Price: Low to High', 'Price: High to Low', 'Nearest'];
+  final List<String> propertyTypeOptions = ['Any', 'Apartment', 'House', 'Condo', 'Studio', 'Room', 'Townhouse'];
   final List<String> furnishingOptions = ['Any', 'Fully Furnished', 'Semi-Furnished', 'Unfurnished'];
-  final List<String> petPolicyOptions = ['Any', 'Pets Allowed', 'No Pets', 'Cats Only', 'Dogs Only'];
-  final List<String> smokingPolicyOptions = ['Any', 'Smoking Allowed', 'No Smoking', 'Outdoor Only'];
+  final List<String> petPolicyOptions = ['Any', 'Pets Allowed', 'No Pets'];
+  final List<String> smokingPolicyOptions = ['Any', 'Smoking Allowed', 'No Smoking'];
 
   @override
   Widget build(BuildContext context) {
@@ -78,7 +76,6 @@ class _FilterWidgetState extends State<FilterWidget> {
                         setState(() {
                           selectedSortBy = 'Any';
                           selectedPropertyType = 'Any';
-                          selectedCity = 'Any';
                           selectedFurnishing = 'Any';
                           selectedPetPolicy = 'Any';
                           selectedSmokingPolicy = 'Any';
@@ -111,9 +108,6 @@ class _FilterWidgetState extends State<FilterWidget> {
                     }),
                     _buildFilterDropdown('Property Type', propertyTypeOptions, selectedPropertyType, (value) {
                       setState(() => selectedPropertyType = value!);
-                    }),
-                    _buildFilterDropdown('City/Municipal', cityOptions, selectedCity, (value) {
-                      setState(() => selectedCity = value!);
                     }),
                     
                     // Bedrooms Counter
@@ -163,7 +157,6 @@ class _FilterWidgetState extends State<FilterWidget> {
                     final filters = {
                       'sortBy': selectedSortBy,
                       'propertyType': selectedPropertyType,
-                      'city': selectedCity,
                       'bedrooms': bedrooms,
                       'bathrooms': bathrooms,
                       'minArea': minArea,
@@ -216,7 +209,7 @@ class _FilterWidgetState extends State<FilterWidget> {
           canvasColor: Colors.white,
         ),
         child: DropdownButtonFormField<String>(
-          value: selectedValue,
+          initialValue: selectedValue,
           decoration: InputDecoration(
             labelText: label,
             labelStyle: const TextStyle(
