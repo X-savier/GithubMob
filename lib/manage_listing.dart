@@ -520,6 +520,9 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
   bool _isImmediate = true;
   DateTime? _availableFrom;
   String _leaseTerm = '12 months';
+  // 'lease' (fixed term) or 'rent' (month-to-month). Drives which
+  // contract template the tenant + landlord see post-approval.
+  String _listingType = 'lease';
 
   final Map<String, bool> _amenities = {
     'Air Conditioning': false,
@@ -605,6 +608,7 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
           _availableFrom = DateTime.tryParse(data['available_from'].toString());
         }
         _leaseTerm = data['lease_term']?.toString() ?? '12 months';
+        _listingType = data['listing_type']?.toString() ?? 'lease';
         _petsAllowed = data['pets_allowed'] == true;
         _smokingAllowed = data['smoking_allowed'] == true;
         _noCurfew = data['no_curfew'] == true;
@@ -1280,6 +1284,29 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
         ),
         SizedBox(
           width: MediaQuery.of(context).size.width > 600
+              ? 220
+              : double.infinity,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _fieldLabel('Listing Type:'),
+              _dropdown(
+                hint: 'Lease (Fixed Term)',
+                value: _listingType == 'rent'
+                    ? 'Month-to-Month Rent'
+                    : 'Lease (Fixed Term)',
+                items: const [
+                  'Lease (Fixed Term)',
+                  'Month-to-Month Rent',
+                ],
+                onChanged: (v) => setState(() => _listingType =
+                    v == 'Month-to-Month Rent' ? 'rent' : 'lease'),
+              ),
+            ],
+          ),
+        ),
+        SizedBox(
+          width: MediaQuery.of(context).size.width > 600
               ? 200
               : double.infinity,
           child: Column(
@@ -1925,7 +1952,7 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
                                   width: 90,
                                   height: 65,
                                   fit: BoxFit.cover,
-                                  errorBuilder: (_, __, ___) => Container(
+                                  errorBuilder: (_, _, _) => Container(
                                     color: Colors.grey[300],
                                     child: const Icon(Icons.view_in_ar,
                                         size: 16, color: Colors.grey),
@@ -1936,7 +1963,7 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
                                   width: 90,
                                   height: 65,
                                   fit: BoxFit.cover,
-                                  errorBuilder: (_, __, ___) => Container(
+                                  errorBuilder: (_, _, _) => Container(
                                     color: Colors.grey[300],
                                     child: const Icon(Icons.view_in_ar,
                                         size: 16, color: Colors.grey),
@@ -2358,6 +2385,7 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
             : _listingTitleCtrl.text,
         'description': _aboutPlaceCtrl.text.isEmpty ? null : _aboutPlaceCtrl.text,
         'property_type': _propertyType,
+        'listing_type': _listingType,
         'status': _isActive ? 'active' : 'inactive',
         'cover_photo_url': ?coverPhotoPath,
       };

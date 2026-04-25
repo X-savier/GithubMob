@@ -454,7 +454,7 @@ void main() {
                 .clamp(0, 100);
 
         print('maxFrames=$maxFrames: '
-            '${effectiveFrames} frames used, '
+            '$effectiveFrames frames used, '
             '${angularStep.toStringAsFixed(1)}° between frames, '
             '${overlapPercent.toStringAsFixed(0)}% overlap');
 
@@ -476,7 +476,7 @@ void main() {
         final framesPerFullRotation = (360 / interval).ceil();
 
         print('interval=${interval.toInt()}°: '
-            '${framesPerFullRotation} frames for 360°, '
+            '$framesPerFullRotation frames for 360°, '
             '${overlapPercent.toStringAsFixed(0)}% overlap');
       }
     });

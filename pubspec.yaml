@@ -49,6 +49,7 @@ dependencies:
   sensors_plus: ^6.1.1
   opencv_dart: ^1.4.3
   path_provider: ^2.1.0
+  flutter_stripe: ^11.4.0
 
 dev_dependencies:
   flutter_test:

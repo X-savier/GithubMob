@@ -89,7 +89,7 @@ class _PanoramaTourViewerState extends State<PanoramaTourViewer> {
                     room.imageUrl,
                     fit: BoxFit.cover,
                     semanticLabel: '360° view of ${room.label}',
-                    errorBuilder: (_, __, ___) => Container(
+                    errorBuilder: (_, _, _) => Container(
                       color: Colors.black,
                       child: Center(
                         child: Column(

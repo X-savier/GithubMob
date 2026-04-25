@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'contract_view_screen.dart';
 import 'property_data.dart';
 
 // ─── Colors ───────────────────────────────────────────────────────────────────
@@ -134,6 +134,7 @@ class _ApplicationDetailsScreenState extends State<ApplicationDetailsScreen> {
   ApplicationData? _data;
   bool _isLoading = true;
   bool _isUpdating = false;
+  String? _listingId;
 
   @override
   void initState() {
@@ -168,6 +169,7 @@ class _ApplicationDetailsScreenState extends State<ApplicationDetailsScreen> {
         setState(() {
           _data = ApplicationData.fromMap(app, docs);
           _status = status;
+          _listingId = app['listing_id']?.toString();
           _isLoading = false;
         });
       }
@@ -200,6 +202,29 @@ class _ApplicationDetailsScreenState extends State<ApplicationDetailsScreen> {
         );
       }
     }
+  }
+
+  Future<void> _openContract() async {
+    if (_listingId == null) return;
+    final listing = await Supabase.instance.client
+        .from('listings')
+        .select('landlord_id')
+        .eq('id', _listingId!)
+        .maybeSingle();
+    final landlordId = listing?['landlord_id']?.toString() ??
+        Supabase.instance.client.auth.currentUser?.id ??
+        '';
+    if (!mounted) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ContractViewScreen(
+          applicationId: widget.applicationId,
+          listingId: _listingId!,
+          landlordId: landlordId,
+        ),
+      ),
+    );
   }
 
   Future<void> _onReject() async {
@@ -534,13 +559,22 @@ class _ApplicationDetailsScreenState extends State<ApplicationDetailsScreen> {
           ],
         );
       case AppStatus.approved:
-        return Center(
-          child: StatusButton(
-            label: 'Approved!',
-            color: C.green,
-            onPressed: null,
-            minWidth: 180,
-          ),
+        return Column(
+          children: [
+            StatusButton(
+              label: 'Approved!',
+              color: C.green,
+              onPressed: null,
+              minWidth: 180,
+            ),
+            const SizedBox(height: 12),
+            StatusButton(
+              label: 'View / Sign Contract',
+              color: C.coral,
+              minWidth: 220,
+              onPressed: _openContract,
+            ),
+          ],
         );
       case AppStatus.rejected:
         return Center(

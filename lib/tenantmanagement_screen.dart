@@ -1,16 +1,45 @@
 import 'package:flutter/material.dart';
+
 import 'payment_screen.dart';
+import 'property_data.dart';
 import 'report_management_screen.dart';
 
-class TenantManagementScreen extends StatelessWidget {
+/// Landlord-facing tenant management. Lists every active tenant
+/// (contract status='paid') across all the landlord's listings with
+/// quick links to contact, view payments, or open the reports queue.
+class TenantManagementScreen extends StatefulWidget {
   const TenantManagementScreen({super.key});
 
-  // Theme colors - EXACTLY as specified
-  static const Color primaryOrange = Color(0xFFFF7043); // Main orange
-  static const Color lightOrange = Color(0xFFFF8A80); // Light orange
+  static const Color primaryOrange = Color(0xFFFF7043);
   static const Color darkText = Color(0xFF333333);
   static const Color lightText = Color(0xFF666666);
   static const Color borderColor = Color(0xFFEEEEEE);
+
+  @override
+  State<TenantManagementScreen> createState() =>
+      _TenantManagementScreenState();
+}
+
+class _TenantManagementScreenState extends State<TenantManagementScreen> {
+  bool _loading = true;
+  List<Map<String, dynamic>> _tenants = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _refresh();
+  }
+
+  Future<void> _refresh() async {
+    setState(() => _loading = true);
+    final data = await fetchActiveTenants();
+    if (mounted) {
+      setState(() {
+        _tenants = data;
+        _loading = false;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -22,415 +51,250 @@ class TenantManagementScreen extends StatelessWidget {
           style: TextStyle(
             fontSize: 20,
             fontWeight: FontWeight.bold,
-            color: darkText,
+            color: TenantManagementScreen.darkText,
           ),
         ),
         centerTitle: false,
         backgroundColor: Colors.white,
         elevation: 0.5,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: darkText),
+          icon: const Icon(Icons.arrow_back,
+              color: TenantManagementScreen.darkText),
           onPressed: () => Navigator.pop(context),
         ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh,
+                color: TenantManagementScreen.darkText),
+            onPressed: _loading ? null : _refresh,
+          ),
+        ],
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          // Tenant Management Header - IN PRIMARY ORANGE (0xFFFF7043)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 16),
-            child: Text(
-              'Tenant Management',
-              style: TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-                color: primaryOrange,
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : RefreshIndicator(
+              onRefresh: _refresh,
+              child: ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Text(
+                      'Active Tenants',
+                      style: TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                        color: TenantManagementScreen.primaryOrange,
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 14),
+                    child: Text(
+                      _tenants.isEmpty
+                          ? 'No active tenants yet.'
+                          : '${_tenants.length} active tenant${_tenants.length == 1 ? '' : 's'} across your listings.',
+                      style: const TextStyle(
+                          fontSize: 13,
+                          color: TenantManagementScreen.lightText),
+                    ),
+                  ),
+                  if (_tenants.isEmpty) _emptyState() else
+                    for (final t in _tenants) ...[
+                      _tenantCard(t),
+                      const SizedBox(height: 14),
+                    ],
+                ],
               ),
             ),
+    );
+  }
+
+  Widget _emptyState() {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 36, horizontal: 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: TenantManagementScreen.borderColor),
+      ),
+      child: Column(
+        children: [
+          Icon(Icons.people_outline,
+              size: 56, color: Colors.grey.shade400),
+          const SizedBox(height: 12),
+          const Text('No active tenants yet',
+              style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: TenantManagementScreen.darkText)),
+          const SizedBox(height: 4),
+          Text(
+            'Tenants appear here once their contract is fully signed and paid.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+                fontSize: 12, color: Colors.grey.shade600),
           ),
-          
-          // Current Stay Card
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: borderColor),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Current Stay',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: darkText,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                
-                // Guest name row
-                Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Guest name:',
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: lightText,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          const Text(
-                            'Juan dela cruz',
-                            style: TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w600,
-                              color: darkText,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Property:',
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: lightText,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          const Text(
-                            'Sunset Villa',
-                            style: TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w600,
-                              color: darkText,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                
-                const SizedBox(height: 12),
-                
-                // Check in/out row
-                Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Check in/ Check out:',
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: lightText,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          const Text(
-                            'Jan 28, 2026 - Feb 9, 2026',
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w500,
-                              color: darkText,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Days Remaining:',
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: lightText,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            '12 Days',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              color: primaryOrange,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                
-                const SizedBox(height: 20),
-                
-                // Reporting | Chat | Payment row
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
-                  children: [
-                    _buildActionButton(
-                      icon: Icons.report_problem,
-                      label: 'Reporting',
-                      onTap: () {
-                        // Navigate to Report Management Screen
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => const ReportManagementScreen(),
-                          ),
-                        );
-                      },
-                    ),
-                    Container(
-                      height: 20,
-                      width: 1,
-                      color: borderColor,
-                    ),
-                    _buildActionButton(
-                      icon: Icons.chat,
-                      label: 'Chat',
-                      onTap: () {
-                        // Handle Chat
-                      },
-                    ),
-                    Container(
-                      height: 20,
-                      width: 1,
-                      color: borderColor,
-                    ),
-                    _buildActionButton(
-                      icon: Icons.payment,
-                      label: 'Payment',
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => const PaymentScreen(),
-                          ),
-                        );
-                      },
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          
-          const SizedBox(height: 24),
-          
-          // Submit New Report Form
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: borderColor),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Submit New Report',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: darkText,
-                  ),
-                ),
-                
-                const SizedBox(height: 20),
-                
-                // Report Type
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  decoration: BoxDecoration(
-                    border: Border.all(color: borderColor),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: DropdownButtonFormField<String>(
-                    initialValue: 'Maintenance',
-                    decoration: const InputDecoration(
-                      border: InputBorder.none,
-                      labelText: 'Report Type',
-                      labelStyle: TextStyle(
-                        fontSize: 14,
-                        color: lightText,
-                      ),
-                    ),
-                    icon: Icon(Icons.arrow_drop_down, color: primaryOrange),
-                    items: const [
-                      DropdownMenuItem(
-                        value: 'Maintenance',
-                        child: Text('Maintenance'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'Cleaning',
-                        child: Text('Cleaning'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'Amenity Request',
-                        child: Text('Amenity Request'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'Noise Complaint',
-                        child: Text('Noise Complaint'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'Other',
-                        child: Text('Other'),
-                      ),
-                    ],
-                    onChanged: (value) {},
-                  ),
-                ),
-                
-                const SizedBox(height: 16),
-                
-                // Priority Type
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  decoration: BoxDecoration(
-                    border: Border.all(color: borderColor),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: DropdownButtonFormField<String>(
-                    initialValue: 'Medium',
-                    decoration: const InputDecoration(
-                      border: InputBorder.none,
-                      labelText: 'Priority Type',
-                      labelStyle: TextStyle(
-                        fontSize: 14,
-                        color: lightText,
-                      ),
-                    ),
-                    icon: Icon(Icons.arrow_drop_down, color: primaryOrange),
-                    items: const [
-                      DropdownMenuItem(
-                        value: 'Low',
-                        child: Text('Low'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'Medium',
-                        child: Text('Medium'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'High',
-                        child: Text('High'),
-                      ),
-                    ],
-                    onChanged: (value) {},
-                  ),
-                ),
-                
-                const SizedBox(height: 16),
-                
-                // Title
-                TextFormField(
-                  decoration: InputDecoration(
-                    labelText: 'Title',
-                    labelStyle: TextStyle(
-                      fontSize: 14,
-                      color: lightText,
-                    ),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: BorderSide(color: borderColor),
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: BorderSide(color: borderColor),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: BorderSide(color: primaryOrange, width: 1),
-                    ),
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 16,
-                    ),
-                  ),
-                ),
-                
-                const SizedBox(height: 16),
-                
-                // Description
-                TextFormField(
-                  maxLines: 3,
-                  decoration: InputDecoration(
-                    labelText: 'Description',
-                    labelStyle: TextStyle(
-                      fontSize: 14,
-                      color: lightText,
-                    ),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: BorderSide(color: borderColor),
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: BorderSide(color: borderColor),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: BorderSide(color: primaryOrange, width: 1),
-                    ),
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 16,
-                    ),
-                  ),
-                ),
-                
-                const SizedBox(height: 24),
-                
-                // Submit Report Button
-                SizedBox(
-                  width: double.infinity,
-                  height: 50,
-                  child: ElevatedButton(
-                    onPressed: () {},
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: primaryOrange,
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      elevation: 0,
-                    ),
-                    child: const Text(
-                      'Submit Report',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          
-          const SizedBox(height: 20),
         ],
       ),
     );
   }
 
-  Widget _buildActionButton({
+  Widget _tenantCard(Map<String, dynamic> t) {
+    final listing = (t['listings'] as Map?) ?? {};
+    final app = (t['application'] as Map?) ?? {};
+    final tenantName =
+        '${app['first_name'] ?? ''} ${app['last_name'] ?? ''}'.trim();
+    final propertyTitle = listing['title']?.toString() ?? 'Listing';
+    final email = app['email']?.toString() ?? '';
+    final phone = app['phone_number']?.toString() ?? '';
+    final movedInIso = t['landlord_signed_at']?.toString();
+    final movedIn = _formatDate(movedInIso);
+
+    final daysSinceMoveIn = movedInIso == null
+        ? null
+        : DateTime.now()
+            .difference(DateTime.tryParse(movedInIso) ?? DateTime.now())
+            .inDays;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: TenantManagementScreen.borderColor),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              CircleAvatar(
+                radius: 22,
+                backgroundColor:
+                    TenantManagementScreen.primaryOrange.withValues(alpha: 0.15),
+                child: Text(
+                  tenantName.isEmpty
+                      ? '?'
+                      : tenantName.substring(0, 1).toUpperCase(),
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: TenantManagementScreen.primaryOrange),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(tenantName.isEmpty ? 'Tenant' : tenantName,
+                        style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: TenantManagementScreen.darkText)),
+                    const SizedBox(height: 2),
+                    Text(propertyTitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 12,
+                            color: TenantManagementScreen.lightText)),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF4CAF50).withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: const Text('Active',
+                    style: TextStyle(
+                        color: Color(0xFF4CAF50),
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(child: _kv('Move-in', movedIn)),
+              Expanded(
+                  child: _kv('Days in stay',
+                      daysSinceMoveIn?.toString() ?? '—')),
+            ],
+          ),
+          if (email.isNotEmpty || phone.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                if (email.isNotEmpty)
+                  Expanded(child: _kv('Email', email)),
+                if (phone.isNotEmpty)
+                  Expanded(child: _kv('Phone', phone)),
+              ],
+            ),
+          ],
+          const SizedBox(height: 14),
+          Container(
+            decoration: BoxDecoration(
+              border: Border(
+                  top: BorderSide(
+                      color: TenantManagementScreen.borderColor)),
+            ),
+            padding: const EdgeInsets.only(top: 8),
+            child: Row(
+              children: [
+                _action(
+                  icon: Icons.report_problem,
+                  label: 'Reports',
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const ReportManagementScreen(),
+                    ),
+                  ),
+                ),
+                Container(
+                    height: 22,
+                    width: 1,
+                    color: TenantManagementScreen.borderColor),
+                _action(
+                  icon: Icons.payments_outlined,
+                  label: 'Payments',
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => PaymentScreen(
+                        contractId: t['id']?.toString(),
+                      ),
+                    ),
+                  ),
+                ),
+                Container(
+                    height: 22,
+                    width: 1,
+                    color: TenantManagementScreen.borderColor),
+                _action(
+                  icon: Icons.chat_bubble_outline,
+                  label: 'Chat',
+                  onTap: () {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Chat coming soon')),
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _action({
     required IconData icon,
     required String label,
     required VoidCallback onTap,
@@ -440,27 +304,52 @@ class TenantManagementScreen extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(8),
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8),
+          padding: const EdgeInsets.symmetric(vertical: 10),
           child: Column(
             children: [
-              Icon(
-                icon,
-                size: 20,
-                color: primaryOrange,
-              ),
+              Icon(icon,
+                  size: 20,
+                  color: TenantManagementScreen.primaryOrange),
               const SizedBox(height: 4),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w500,
-                  color: primaryOrange,
-                ),
-              ),
+              Text(label,
+                  style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      color: TenantManagementScreen.primaryOrange)),
             ],
           ),
         ),
       ),
     );
+  }
+
+  Widget _kv(String label, String value) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label,
+            style: const TextStyle(
+                fontSize: 11, color: TenantManagementScreen.lightText)),
+        const SizedBox(height: 2),
+        Text(value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: TenantManagementScreen.darkText)),
+      ],
+    );
+  }
+
+  String _formatDate(String? iso) {
+    if (iso == null) return '—';
+    final d = DateTime.tryParse(iso);
+    if (d == null) return iso;
+    const months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    ];
+    return '${months[d.month - 1]} ${d.day}, ${d.year}';
   }
 }

@@ -1,7 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_stripe/flutter_stripe.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'login_screen.dart';
-import 'signup_screen.dart'; 
+import 'signup_screen.dart';
+
+/// Stripe sandbox PUBLISHABLE key (pk_test_…). Safe to ship with the app.
+/// Replace this with your own test key from
+/// https://dashboard.stripe.com/test/apikeys before running.
+const String kStripePublishableKey = 'pk_test_51TPiWG55DUSYSwmRqKfo7Rvu8K4YzCqTXHmKKfdQyC7RyJ9csfl7XPUlUIw3ugz20nxUZ8l36CZO7bwiSuS8D8dc000uUrc4pK';
 
 void main() async{
   WidgetsFlutterBinding.ensureInitialized();
@@ -10,6 +16,9 @@ void main() async{
     anonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1xc2R0Z3Z4eXJ2a29ybm5pZmVuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYyMzM5MDksImV4cCI6MjA5MTgwOTkwOX0.nKTYsvBh9I_64Aa25RluKye79eSIQwBpS8ExWuIiKRc",
     url: "https://mqsdtgvxyrvkornnifen.supabase.co",
   );
+
+  Stripe.publishableKey = kStripePublishableKey;
+  await Stripe.instance.applySettings();
 
   runApp(const MyApp());
 }

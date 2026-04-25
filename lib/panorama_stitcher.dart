@@ -46,6 +46,15 @@ class PanoramaStitcher {
   /// Maximum features to detect per image.
   final int maxFeatures;
 
+  /// Target yaw spacing (degrees) for motion-based frame selection.
+  /// Should match the capture screen's captureIntervalDeg.
+  final double idealStepDeg;
+
+  /// Camera horizontal field of view (degrees) used to convert Δyaw into
+  /// expected pixel translation. 65° is a typical phone back-camera HFOV
+  /// at 4:3; close enough for a match-filter prior.
+  final double hfovDeg;
+
   const PanoramaStitcher({
     this.maxStitchFrames = 36,
     this.stitchMaxDimension = 600,
@@ -53,6 +62,8 @@ class PanoramaStitcher {
     this.ransacThreshold = 5.0,
     this.loweRatioThresh = 0.75,
     this.maxFeatures = 1000,
+    this.idealStepDeg = 10.0,
+    this.hfovDeg = 65.0,
   });
 
   /// Subsample [paths] to at most [maxFrames] entries, evenly spaced.
@@ -73,6 +84,139 @@ class PanoramaStitcher {
     final indices = List.generate(yaws.length, (i) => i);
     indices.sort((a, b) => yaws[a].compareTo(yaws[b]));
     return indices;
+  }
+
+  /// Greedy motion-based frame selector. Sorts (path, yaw) by yaw, then
+  /// keeps each frame only if it advances at least [idealStepDeg] from the
+  /// last kept yaw — drops near-duplicates from pauses without losing
+  /// coverage on segments where the user panned smoothly.
+  ///
+  /// Falls back to [subsampleWithYaw] if yaws are unusable (length
+  /// mismatch or all zero) or if the greedy result has < 2 frames.
+  /// Output is yaw-sorted, so the caller can skip a separate sort pass.
+  static (List<String>, List<double>) motionBasedSelectFrames(
+    List<String> paths,
+    List<double> yaws, {
+    required double idealStepDeg,
+    required int maxFrames,
+  }) {
+    if (yaws.length != paths.length || yaws.every((y) => y == 0.0)) {
+      return subsampleWithYaw(paths, yaws, maxFrames);
+    }
+
+    final sortedIdx = sortByYaw(yaws);
+    final sortedPaths = sortedIdx.map((i) => paths[i]).toList();
+    final sortedYaws = sortedIdx.map((i) => yaws[i]).toList();
+
+    List<int> greedyKeep(double step) {
+      final kept = <int>[0];
+      for (int i = 1; i < sortedYaws.length; i++) {
+        if (sortedYaws[i] - sortedYaws[kept.last] >= step) kept.add(i);
+      }
+      return kept;
+    }
+
+    var kept = greedyKeep(idealStepDeg);
+
+    // If we still have too many, widen the step based on actual span.
+    if (kept.length > maxFrames) {
+      final span = sortedYaws.last - sortedYaws.first;
+      final widened = span / (maxFrames - 1);
+      kept = greedyKeep(widened);
+    }
+
+    if (kept.length < 2) {
+      return subsampleWithYaw(paths, yaws, maxFrames);
+    }
+
+    final outPaths = kept.map((i) => sortedPaths[i]).toList();
+    final outYaws = kept.map((i) => sortedYaws[i]).toList();
+
+    // Median Δyaw for diagnostics.
+    final deltas = <double>[
+      for (int i = 1; i < outYaws.length; i++) outYaws[i] - outYaws[i - 1],
+    ]..sort();
+    final medianDelta =
+        deltas.isEmpty ? 0.0 : deltas[deltas.length ~/ 2];
+    debugPrint('[Panorama] Motion-select: kept ${kept.length}/${paths.length}'
+        ' (median Δyaw = ${medianDelta.toStringAsFixed(1)}°)');
+
+    return (outPaths, outYaws);
+  }
+
+  /// Validate a sorted yaw sequence. Returns whether the sequence is
+  /// usable at all (`ok`) and whether it's clean enough to seed the
+  /// homography prior (`useYawPrior`). On any soft failure we still try
+  /// to stitch — features alone may rescue the run — but we drop the
+  /// yaw-driven guidance.
+  static ({bool ok, bool useYawPrior, String reason}) _validateYawSequence(
+      List<double> yaws, int frameCount) {
+    if (yaws.length != frameCount || yaws.length < 2) {
+      return (ok: false, useYawPrior: false, reason: 'no yaw data');
+    }
+    final span = yaws.last - yaws.first;
+    if (span < 60.0 || span > 380.0) {
+      return (
+        ok: true,
+        useYawPrior: false,
+        reason: 'span ${span.toStringAsFixed(1)}° out of range',
+      );
+    }
+    double maxGap = 0.0;
+    int maxGapIdx = 0;
+    int dupCount = 0;
+    for (int i = 1; i < yaws.length; i++) {
+      final d = yaws[i] - yaws[i - 1];
+      if (d > maxGap) {
+        maxGap = d;
+        maxGapIdx = i;
+      }
+      if (d < 0.5) dupCount++;
+    }
+    if (maxGap > 30.0) {
+      return (
+        ok: true,
+        useYawPrior: false,
+        reason: 'yaw gap ${maxGap.toStringAsFixed(1)}° at index $maxGapIdx',
+      );
+    }
+    if (dupCount > yaws.length * 0.2) {
+      return (
+        ok: true,
+        useYawPrior: false,
+        reason: 'too many near-duplicate yaws ($dupCount)',
+      );
+    }
+    return (
+      ok: true,
+      useYawPrior: true,
+      reason: 'span=${span.toStringAsFixed(1)}° maxGap=${maxGap.toStringAsFixed(1)}°',
+    );
+  }
+
+  /// 1D constant-position Kalman smoother on a sorted yaw sequence.
+  /// Removes residual gyro noise that survived the capture-side EMA.
+  /// Output is monotonic non-decreasing (the sort already guarantees the
+  /// raw input is, but the filtered estimate is clamped just in case).
+  ///
+  /// processVar / measVar in degrees². Steady-state gain ≈ 0.4 with the
+  /// defaults — trims jitter without flattening real motion.
+  static List<double> _kalmanSmoothYaws(List<double> yaws,
+      {double processVar = 0.5, double measVar = 2.0}) {
+    if (yaws.length < 3) return List.of(yaws);
+    final out = List<double>.filled(yaws.length, 0.0);
+    double x = yaws.first;
+    double p = measVar;
+    out[0] = x;
+    for (int i = 1; i < yaws.length; i++) {
+      p = p + processVar;
+      final k = p / (p + measVar);
+      x = x + k * (yaws[i] - x);
+      p = (1 - k) * p;
+      if (x < out[i - 1]) x = out[i - 1];
+      out[i] = x;
+    }
+    return out;
   }
 
   /// Load an image and downscale its longest side to [stitchMaxDimension].
@@ -124,6 +268,48 @@ class PanoramaStitcher {
       }
     }
     return good;
+  }
+
+  /// Yaw-seeded variant of [_findPairHomography]. Filters [matches] to
+  /// those whose horizontal displacement is consistent with the gyroscope
+  /// prior, then runs the standard RANSAC fit on the filtered set. Falls
+  /// back to the unfiltered call if too few matches survive — the prior
+  /// is a guide, not a hard requirement.
+  ///
+  /// Sign convention: kps1 are panorama (dst) points, kps2 are next-frame
+  /// (src) points. A positive Δyaw (rotated right) means content in the
+  /// next frame appears shifted left in panorama coords, so for a true
+  /// match dst.x − src.x ≈ −expectedTxPx.
+  cv.Mat? _findPairHomographyWithYaw(
+    cv.VecKeyPoint kps1,
+    cv.VecKeyPoint kps2,
+    List<cv.DMatch> matches, {
+    required double deltaYawDeg,
+    required int imageWidth,
+  }) {
+    final hfovRad = hfovDeg * math.pi / 180.0;
+    final focalPx = imageWidth / (2.0 * math.tan(hfovRad / 2.0));
+    final deltaYawRad = deltaYawDeg * math.pi / 180.0;
+    final expectedTxPx = focalPx * math.tan(deltaYawRad);
+    final tolerance = math.max(30.0, 0.4 * expectedTxPx.abs());
+
+    final filtered = <cv.DMatch>[];
+    for (final m in matches) {
+      final p1 = kps1[m.queryIdx];
+      final p2 = kps2[m.trainIdx];
+      final dx = p1.x - p2.x;
+      if ((dx - (-expectedTxPx)).abs() <= tolerance) filtered.add(m);
+    }
+
+    debugPrint('[Panorama] Yaw-prior filter: ${matches.length} → '
+        '${filtered.length} matches (expected tx='
+        '${expectedTxPx.toStringAsFixed(0)}px '
+        '±${tolerance.toStringAsFixed(0)}px)');
+
+    if (filtered.length < minInlierMatches) {
+      return _findPairHomography(kps1, kps2, matches);
+    }
+    return _findPairHomography(kps1, kps2, filtered);
   }
 
   /// Find homography between two images using matched keypoints + RANSAC.
@@ -187,34 +373,63 @@ class PanoramaStitcher {
     return H;
   }
 
-  /// Normalize brightness across frames to reduce visible exposure
-  /// differences at stitch boundaries. Uses median brightness as target.
+  /// Per-channel gain compensation. Computes mean B/G/R for every frame,
+  /// then scales each channel independently toward the median-of-means.
+  /// Preserves white balance across frames (the previous luminance-only
+  /// version produced visible color jumps when light temperature shifted
+  /// — warm hallway → cool window — because all three channels were
+  /// scaled by the same factor).
   static void _gainCompensate(List<cv.Mat> images) {
-    final means = <double>[];
+    final meansB = <double>[];
+    final meansG = <double>[];
+    final meansR = <double>[];
     for (final img in images) {
-      final gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY);
-      final m = cv.mean(gray);
-      gray.dispose();
-      means.add(m.val1);
+      final m = cv.mean(img); // val1=B, val2=G, val3=R for BGR Mats
+      meansB.add(m.val1);
+      meansG.add(m.val2);
+      meansR.add(m.val3);
     }
 
-    final sorted = List<double>.from(means)..sort();
-    final target = sorted[sorted.length ~/ 2];
-    if (target < 1.0) return;
+    double median(List<double> v) {
+      final s = List<double>.from(v)..sort();
+      return s[s.length ~/ 2];
+    }
+
+    final targetB = median(meansB);
+    final targetG = median(meansG);
+    final targetR = median(meansR);
+    if (targetB < 1.0 || targetG < 1.0 || targetR < 1.0) return;
 
     for (int i = 0; i < images.length; i++) {
-      if (means[i] < 1.0) continue;
-      final scale = target / means[i];
-      if (scale < 0.5 || scale > 2.0) continue;
-      if ((scale - 1.0).abs() < 0.05) continue;
+      if (meansB[i] < 1.0 || meansG[i] < 1.0 || meansR[i] < 1.0) continue;
+      final sB = (targetB / meansB[i]).clamp(0.5, 2.0);
+      final sG = (targetG / meansG[i]).clamp(0.5, 2.0);
+      final sR = (targetR / meansR[i]).clamp(0.5, 2.0);
+      if ((sB - 1.0).abs() < 0.03 &&
+          (sG - 1.0).abs() < 0.03 &&
+          (sR - 1.0).abs() < 0.03) {
+        continue;
+      }
 
-      final adjusted = images[i].convertTo(images[i].type, alpha: scale);
+      final channels = cv.split(images[i]);
+      final adjB = channels[0].convertTo(channels[0].type, alpha: sB);
+      final adjG = channels[1].convertTo(channels[1].type, alpha: sG);
+      final adjR = channels[2].convertTo(channels[2].type, alpha: sR);
+      for (final c in channels) {
+        c.dispose();
+      }
+      final merged = cv.merge(cv.VecMat.fromList([adjB, adjG, adjR]));
+      adjB.dispose();
+      adjG.dispose();
+      adjR.dispose();
       images[i].dispose();
-      images[i] = adjusted;
+      images[i] = merged;
     }
 
-    debugPrint('[Panorama] Gain compensation: '
-        'target brightness=${target.toStringAsFixed(1)}');
+    debugPrint('[Panorama] Gain compensation (per-channel): '
+        'target B=${targetB.toStringAsFixed(0)} '
+        'G=${targetG.toStringAsFixed(0)} '
+        'R=${targetR.toStringAsFixed(0)}');
   }
 
   /// Remove black borders created by perspective warping.
@@ -281,7 +496,7 @@ class PanoramaStitcher {
     if (cropW < 100 || cropH < 50) return image.clone();
 
     debugPrint('[Panorama] Auto-crop: '
-        '${image.width}×${image.height} → ${cropW}×$cropH');
+        '${image.width}×${image.height} → $cropW×$cropH');
     final cropped = image.region(cv.Rect(left, top, cropW, cropH));
     return cropped.clone();
   }
@@ -289,19 +504,40 @@ class PanoramaStitcher {
   /// Full stitch pipeline using sequential pairwise stitching.
   String? stitchFrames(StitchInput input) {
     try {
-      final (sampled, sampledYaw) =
-          subsampleWithYaw(input.framePaths, input.frameYawDeg, maxStitchFrames);
+      // Kalman-smooth raw yaws before frame selection. Only useful if
+      // yaw count matches frame count; otherwise pass through.
+      final smoothedYaws = input.frameYawDeg.length == input.framePaths.length
+          ? _kalmanSmoothYaws(input.frameYawDeg)
+          : input.frameYawDeg;
 
-      // Sort by yaw for correct left-to-right ordering
-      List<String> orderedPaths;
+      final (sampled, sampledYaw) = motionBasedSelectFrames(
+        input.framePaths,
+        smoothedYaws,
+        idealStepDeg: idealStepDeg,
+        maxFrames: maxStitchFrames,
+      );
+
+      // motionBasedSelectFrames returns yaw-sorted output, so no extra
+      // sort needed when yaws are present. Fallback path (length mismatch)
+      // still goes through the original subsample which doesn't sort.
+      final List<String> orderedPaths;
+      final List<double> orderedYaws;
       if (sampledYaw.length == sampled.length) {
-        final sortedIndices = sortByYaw(sampledYaw);
-        orderedPaths = sortedIndices.map((i) => sampled[i]).toList();
-        debugPrint('[Panorama] ${sampled.length} frames sorted by gyro yaw');
+        orderedPaths = sampled;
+        orderedYaws = sampledYaw;
       } else {
         orderedPaths = sampled;
+        orderedYaws = const <double>[];
         debugPrint('[Panorama] Using capture order (no yaw data)');
       }
+
+      // Yaw sanity check — gates the homography prior. ok=false is rare
+      // and just means we treat the run as if no yaws were present.
+      final sanity = _validateYawSequence(orderedYaws, orderedPaths.length);
+      debugPrint('[Panorama] Yaw sanity: ok=${sanity.ok}'
+          ' useYawPrior=${sanity.useYawPrior} ${sanity.reason}');
+      final List<double> stitchYaws =
+          sanity.ok ? orderedYaws : const <double>[];
 
       // Load all frames
       final images = <cv.Mat>[];
@@ -311,7 +547,9 @@ class PanoramaStitcher {
       }
 
       if (images.length < 2) {
-        for (final m in images) m.dispose();
+        for (final m in images) {
+          m.dispose();
+        }
         return null;
       }
 
@@ -319,7 +557,12 @@ class PanoramaStitcher {
           '(${images.first.width}×${images.first.height})');
 
       // Try sequential pairwise stitching (Sense-Panorama method)
-      String? result = _sequentialStitch(images, input);
+      String? result = _sequentialStitch(
+        images,
+        input,
+        yaws: stitchYaws,
+        useYawPrior: sanity.useYawPrior,
+      );
       if (result != null) return result;
 
       // Fallback only for small frame sets — OpenCV Stitcher is O(n²)
@@ -332,7 +575,9 @@ class PanoramaStitcher {
           if (img != null) fallbackImages.add(img);
         }
         result = _fallbackStitch(fallbackImages, input);
-        for (final img in fallbackImages) img.dispose();
+        for (final img in fallbackImages) {
+          img.dispose();
+        }
         return result;
       } else {
         debugPrint('[Panorama] ${orderedPaths.length} frames — skipping O(n²) fallback');
@@ -349,7 +594,12 @@ class PanoramaStitcher {
   /// Incremental approach: stitch frames pair-by-pair into a growing
   /// panorama. Each step only operates on two images (current panorama
   /// + next frame), keeping memory bounded regardless of frame count.
-  String? _sequentialStitch(List<cv.Mat> images, StitchInput input) {
+  String? _sequentialStitch(
+    List<cv.Mat> images,
+    StitchInput input, {
+    List<double> yaws = const <double>[],
+    bool useYawPrior = false,
+  }) {
     // ── 1. Pre-compute features for all frames ──
     final features = <(cv.VecKeyPoint, cv.Mat)?>[];
     for (final img in images) {
@@ -360,7 +610,9 @@ class PanoramaStitcher {
     if (validCount < 2) {
       debugPrint('[Panorama] Only $validCount frames have features');
       _disposeFeatures(features);
-      for (final img in images) img.dispose();
+      for (final img in images) {
+        img.dispose();
+      }
       return null;
     }
 
@@ -368,6 +620,12 @@ class PanoramaStitcher {
 
     // ── 2. Gain compensation ──
     _gainCompensate(images);
+
+    // Yaws are aligned to the original image list. After a successful
+    // pair, advance panoYaw by the captured Δyaw (not by the new
+    // panorama's pixel width — that drifts as the canvas grows).
+    final hasYaws = useYawPrior && yaws.length == images.length;
+    double panoYaw = hasYaws ? yaws[0] : 0.0;
 
     // ── 3. Incremental pairwise stitch ──
     cv.Mat panorama = images[0].clone();
@@ -395,7 +653,17 @@ class PanoramaStitcher {
         continue;
       }
 
-      final H = _findPairHomography(panoKps, nextKps, matches);
+      // With a valid yaw prior, prefilter matches by expected horizontal
+      // shift so RANSAC isn't fooled by repetitive-texture outliers.
+      final H = hasYaws
+          ? _findPairHomographyWithYaw(
+              panoKps,
+              nextKps,
+              matches,
+              deltaYawDeg: yaws[i] - panoYaw,
+              imageWidth: images[i].cols,
+            )
+          : _findPairHomography(panoKps, nextKps, matches);
       if (H == null) {
         debugPrint('[Panorama] Frame $i: homography failed');
         consecutiveFails++;
@@ -417,6 +685,7 @@ class PanoramaStitcher {
       panorama = merged;
       successfulPairs++;
       consecutiveFails = 0;
+      if (hasYaws) panoYaw = yaws[i];
 
       // Re-detect features on the new panorama for the next pair
       // Only detect in the right portion where the next frame will overlap
@@ -427,7 +696,9 @@ class PanoramaStitcher {
     }
 
     _disposeFeatures(features);
-    for (final img in images) img.dispose();
+    for (final img in images) {
+      img.dispose();
+    }
 
     if (successfulPairs < 2) {
       panorama.dispose();
@@ -546,9 +817,16 @@ class PanoramaStitcher {
     only2.dispose();
 
     if (hasOverlap) {
-      // Blur masks to create distance-based weights for smooth transition
-      final w1 = cv.gaussianBlur(mask1, (31, 31), 15.0);
-      final w2 = cv.gaussianBlur(mask2, (31, 31), 15.0);
+      // Blur masks to create distance-based weights for smooth transition.
+      // Kernel is proportional to canvas width (~1/6 of total) so seam
+      // transitions span hundreds of pixels — single-band but absorbs
+      // residual color/exposure mismatch much better than a fixed 31×31.
+      int k = (img1.cols ~/ 6) | 1; // force odd
+      if (k < 31) k = 31;
+      if (k > 301) k = 301; // cap to keep gaussianBlur cost bounded
+      final sigma = k / 3.0;
+      final w1 = cv.gaussianBlur(mask1, (k, k), sigma);
+      final w2 = cv.gaussianBlur(mask2, (k, k), sigma);
 
       // Convert to float for weighted average
       final w1f = w1.convertTo(cv.MatType.CV_32FC1);

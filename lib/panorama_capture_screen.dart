@@ -76,6 +76,20 @@ class _PanoramaCaptureScreenState extends State<PanoramaCaptureScreen>
   double _rotationSinceLastCapture = 0.0;
   double _totalRotation = 0.0;
 
+  // EMA-smoothed gyro rates (rad/s). alpha ≈ 0.35 → ~3-sample time
+  // constant at 60 Hz; trims handshake noise without visible lag.
+  double _yawRateEma = 0.0;
+  double _pitchRateEma = 0.0;
+  static const double _gyroEmaAlpha = 0.35;
+
+  // Live notifiers driven by gyro/accelerometer events. Painter widgets
+  // listen to these so they repaint at sensor rate without triggering
+  // a full Scaffold rebuild (which would re-init the camera widget).
+  final ValueNotifier<double> _liveYaw = ValueNotifier(0.0);
+  final ValueNotifier<double> _liveSinceCapture = ValueNotifier(0.0);
+  final ValueNotifier<double> _livePitch = ValueNotifier(0.0);
+  final ValueNotifier<double> _liveRoll = ValueNotifier(0.0);
+
   // ── Direction tracking ──
   // Signed rotation: positive = right (correct), negative = left (wrong)
   double _signedRotation = 0.0;
@@ -126,6 +140,10 @@ class _PanoramaCaptureScreenState extends State<PanoramaCaptureScreen>
     _gyroSub?.cancel();
     _accelSub?.cancel();
     _pulseController.dispose();
+    _liveYaw.dispose();
+    _liveSinceCapture.dispose();
+    _livePitch.dispose();
+    _liveRoll.dispose();
     super.dispose();
   }
 
@@ -150,6 +168,11 @@ class _PanoramaCaptureScreenState extends State<PanoramaCaptureScreen>
     final tiltFromUpright = math.acos(
       (event.y.abs() / magnitude).clamp(0.0, 1.0),
     ) * (180.0 / math.pi);
+
+    // Roll = left/right lean of the phone. atan2(x, y) gives signed angle
+    // from vertical: 0° when level, positive when leaning right.
+    final rollDeg = math.atan2(event.x, event.y) * (180.0 / math.pi);
+    _liveRoll.value = rollDeg;
 
     // Phone is "upright" if within 25° of vertical
     final upright = tiltFromUpright < 25.0;
@@ -232,6 +255,11 @@ class _PanoramaCaptureScreenState extends State<PanoramaCaptureScreen>
     _wrongDirection = false;
     _cumulativePitch = 0.0;
     _phoneNotLevel = false;
+    _yawRateEma = 0.0;
+    _pitchRateEma = 0.0;
+    _liveYaw.value = 0.0;
+    _liveSinceCapture.value = 0.0;
+    _livePitch.value = 0.0;
     _gyroSub = gyroscopeEventStream(
       samplingPeriod: SensorInterval.gameInterval,
     ).listen(_onGyroscopeEvent);
@@ -266,14 +294,23 @@ class _PanoramaCaptureScreenState extends State<PanoramaCaptureScreen>
     // If moving too fast, skip accumulation — the frame would be blurred.
     if (tooFast) return;
 
+    // EMA on raw rates: removes handshake noise so the integrated yaw
+    // we tag onto each frame is clean. Speed gate above intentionally
+    // uses raw values for instant reaction; smoothing is for accumulation.
+    _yawRateEma = _gyroEmaAlpha * event.y + (1 - _gyroEmaAlpha) * _yawRateEma;
+    _pitchRateEma = _gyroEmaAlpha * event.x + (1 - _gyroEmaAlpha) * _pitchRateEma;
+
     // ── Fix 3: Rotation accumulation ──
-    // Integrate gyro.y (yaw axis for a phone held in portrait) over time.
-    // We use absolute value because direction doesn't matter for coverage.
-    // Note: For landscape orientation, you may need to use event.z instead.
-    final rotationDeg = (event.y * dt) * (180.0 / math.pi);
+    // Integrate smoothed gyro.y (yaw axis in portrait) over time.
+    final rotationDeg = (_yawRateEma * dt) * (180.0 / math.pi);
     _rotationSinceLastCapture += rotationDeg.abs();
     _totalRotation += rotationDeg.abs();
     _signedRotation += rotationDeg;
+
+    // Push live values to notifiers — painters listen at 60 Hz without
+    // forcing a Scaffold rebuild.
+    _liveYaw.value = _totalRotation;
+    _liveSinceCapture.value = _rotationSinceLastCapture;
 
     // Direction check: going left (negative) is wrong direction
     final goingWrong = rotationDeg < -0.3;
@@ -282,8 +319,9 @@ class _PanoramaCaptureScreenState extends State<PanoramaCaptureScreen>
     }
 
     // Track vertical tilt — warn if phone is not level
-    final pitchDeg = (event.x * dt) * (180.0 / math.pi);
+    final pitchDeg = (_pitchRateEma * dt) * (180.0 / math.pi);
     _cumulativePitch += pitchDeg;
+    _livePitch.value = _cumulativePitch;
     final notLevel = _cumulativePitch.abs() > 15;
     if (notLevel != _phoneNotLevel) {
       setState(() => _phoneNotLevel = notLevel);
@@ -361,6 +399,11 @@ class _PanoramaCaptureScreenState extends State<PanoramaCaptureScreen>
         if (file.existsSync() && file.lengthSync() > 0) {
           _validFrameCount++;
           _frameYawDeg.add(_totalRotation); // record gyro yaw for this frame
+          // Reset the per-capture rotation accumulator so the next-target
+          // reticle slides back to the right edge instead of parking in
+          // the middle.
+          _rotationSinceLastCapture = 0.0;
+          _liveSinceCapture.value = 0.0;
           HapticFeedback.lightImpact();
           _showCaptureFlash();
           debugPrint(
@@ -607,26 +650,31 @@ class _PanoramaCaptureScreenState extends State<PanoramaCaptureScreen>
           if (!_stitching && !_failed && !_enhancing && _photoState != null)
             Positioned.fill(
               child: IgnorePointer(
-                child: CustomPaint(
-                  painter: _CylindricalDotGridPainter(
-                    progress: _sweepStarted
-                        ? _totalRotation / _targetRotationDeg
-                        : 0.0,
-                    cameraRect: Rect.fromCenter(
-                      center: Offset(screenSize.width / 2,
-                          screenSize.height / 2),
-                      width: cameraW,
-                      height: cameraH,
-                    ),
-                    isWrongDirection: _wrongDirection,
-                    sweepActive: _sweepStarted,
-                    frameYaws: _frameYawDeg,
-                    totalTargetDeg: _targetRotationDeg,
-                    nextTargetAngle: _sweepStarted
-                        ? _nextTargetIndex * widget.captureIntervalDeg
-                        : null,
-                    captureIntervalDeg: widget.captureIntervalDeg,
-                  ),
+                child: ValueListenableBuilder<double>(
+                  valueListenable: _liveYaw,
+                  builder: (_, liveYaw, _) {
+                    return CustomPaint(
+                      painter: _CylindricalDotGridPainter(
+                        progress: _sweepStarted
+                            ? liveYaw / _targetRotationDeg
+                            : 0.0,
+                        cameraRect: Rect.fromCenter(
+                          center: Offset(screenSize.width / 2,
+                              screenSize.height / 2),
+                          width: cameraW,
+                          height: cameraH,
+                        ),
+                        isWrongDirection: _wrongDirection,
+                        sweepActive: _sweepStarted,
+                        frameYaws: _frameYawDeg,
+                        totalTargetDeg: _targetRotationDeg,
+                        nextTargetAngle: _sweepStarted
+                            ? _nextTargetIndex * widget.captureIntervalDeg
+                            : null,
+                        captureIntervalDeg: widget.captureIntervalDeg,
+                      ),
+                    );
+                  },
                 ),
               ),
             ),
@@ -660,44 +708,80 @@ class _PanoramaCaptureScreenState extends State<PanoramaCaptureScreen>
               ),
             ),
 
-          // ── Direction arrow INSIDE camera rect (during sweep) ──
+          // ── Animated direction pulse INSIDE camera rect, left edge ──
           if (_sweepStarted && !_stitching && !_failed)
             Positioned(
               top: screenSize.height / 2 - 16,
-              left: screenSize.width / 2 - cameraW / 2 + 20,
+              left: screenSize.width / 2 - cameraW / 2 + 14,
               child: IgnorePointer(
-                child: CustomPaint(
-                  size: const Size(48, 32),
-                  painter: _ArrowPainter(
-                    color: _wrongDirection
-                        ? Colors.red.shade400
-                        : const Color(0xFF4DD0E1),
-                  ),
+                child: _DirectionPulse(wrongDirection: _wrongDirection),
+              ),
+            ),
+
+          // ── Sliding next-target reticle (right edge → center) ──
+          if (_sweepStarted && !_stitching && !_failed)
+            Positioned(
+              top: screenSize.height / 2 - 16,
+              left: screenSize.width / 2 - cameraW / 2,
+              child: IgnorePointer(
+                child: _NextTargetReticle(
+                  sinceCapture: _liveSinceCapture,
+                  intervalDeg: widget.captureIntervalDeg,
+                  cameraWidth: cameraW,
+                  wrongDirection: _wrongDirection,
                 ),
               ),
             ),
 
-          // ── Capture guide dot INSIDE camera rect on the right (during sweep) ──
+          // ── Ghost-frame guide drifting from right edge to center ──
+          if (_sweepStarted && !_stitching && !_failed)
+            Center(
+              child: IgnorePointer(
+                child: _GhostFrameGuide(
+                  sinceCapture: _liveSinceCapture,
+                  intervalDeg: widget.captureIntervalDeg,
+                  cameraWidth: cameraW,
+                  cameraHeight: cameraH,
+                  wrongDirection: _wrongDirection,
+                ),
+              ),
+            ),
+
+          // ── Tilting horizon line across the camera viewport ──
           if (_sweepStarted && !_stitching && !_failed)
             Positioned(
-              top: screenSize.height / 2 - 14,
-              left: screenSize.width / 2 + cameraW / 2 - 56,
+              top: screenSize.height / 2 - 12,
+              left: screenSize.width / 2 - cameraW / 2,
               child: IgnorePointer(
-                child: Container(
-                  width: 28,
-                  height: 28,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: _wrongDirection
-                        ? Colors.transparent
-                        : const Color(0xFF4DD0E1),
-                    border: Border.all(
-                      color: _wrongDirection
-                          ? Colors.transparent
-                          : Colors.white,
-                      width: 2.5,
-                    ),
-                  ),
+                child: _HorizonLine(roll: _liveRoll, width: cameraW),
+              ),
+            ),
+
+          // ── Live progress gauge (top of screen, replaces empty bar) ──
+          if (_sweepStarted && !_stitching && !_failed)
+            Positioned(
+              top: pad.top + 8,
+              left: 0,
+              right: 0,
+              child: IgnorePointer(
+                child: _HorizontalProgressGauge(
+                  yaw: _liveYaw,
+                  capturedYaws: _frameYawDeg,
+                  targetDeg: _targetRotationDeg,
+                  wrongDirection: _wrongDirection,
+                ),
+              ),
+            ),
+
+          // ── Live tilt/level bubble (under progress gauge) ──
+          if (_sweepStarted && !_stitching && !_failed)
+            Positioned(
+              top: pad.top + 70,
+              left: 0,
+              right: 0,
+              child: Center(
+                child: IgnorePointer(
+                  child: _TiltBubble(roll: _liveRoll),
                 ),
               ),
             ),
@@ -1310,8 +1394,17 @@ class _CylindricalDotGridPainter extends CustomPainter {
 
     final dotPaint = Paint()..style = PaintingStyle.fill;
 
+    // Horizontal scroll offset. As the user rotates right, the dot
+    // columns slide left — matching the apparent motion of the real
+    // world through the camera viewport. Wrap modulo colSpacing so the
+    // grid stays uniformly filled across the screen.
+    final scrollRaw = -progress * size.width * 2.0;
+    final scrollOffset = scrollRaw % colSpacing;
+
     // ── Draw the dot grid columns ──
-    for (double x = -15.0; x <= size.width + 15.0; x += colSpacing) {
+    for (double x = -15.0 + scrollOffset;
+        x <= size.width + 15.0;
+        x += colSpacing) {
       // Normalized distance from center: 0 = center, 1 = edge
       final u = (x - cx) / (size.width / 2);
       final uAbs = u.abs().clamp(0.0, 1.5);
@@ -1414,8 +1507,9 @@ class _CylindricalDotGridPainter extends CustomPainter {
 
         if (tx < -5 || tx > size.width + 5) continue;
         // Skip markers inside camera rect
-        if (tx > cameraRect.left + 5 && tx < cameraRect.right - 5)
+        if (tx > cameraRect.left + 5 && tx < cameraRect.right - 5) {
           continue;
+        }
 
         final tu =
             ((tx - cx) / (size.width / 2)).abs().clamp(0.0, 1.5);
@@ -1557,48 +1651,6 @@ class _EyeTargetPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_EyeTargetPainter oldDelegate) => false;
-}
-
-// ─────────────────────────────────────────────
-// ARROW PAINTER (play-button triangle)
-// ─────────────────────────────────────────────
-
-class _ArrowPainter extends CustomPainter {
-  final Color color;
-
-  _ArrowPainter({required this.color});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = color
-      ..style = PaintingStyle.fill;
-
-    // Draw two overlapping triangles for the >> effect
-    final path1 = Path()
-      ..moveTo(0, size.height * 0.2)
-      ..lineTo(size.width * 0.5, size.height * 0.5)
-      ..lineTo(0, size.height * 0.8)
-      ..close();
-
-    final path2 = Path()
-      ..moveTo(size.width * 0.35, size.height * 0.2)
-      ..lineTo(size.width * 0.85, size.height * 0.5)
-      ..lineTo(size.width * 0.35, size.height * 0.8)
-      ..close();
-
-    // Semi-transparent first arrow
-    paint.color = color.withValues(alpha: 0.4);
-    canvas.drawPath(path1, paint);
-
-    // Solid second arrow
-    paint.color = color;
-    canvas.drawPath(path2, paint);
-  }
-
-  @override
-  bool shouldRepaint(_ArrowPainter oldDelegate) =>
-      oldDelegate.color != color;
 }
 
 // ─────────────────────────────────────────────
@@ -1852,6 +1904,528 @@ class _ScoreBar extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
+// LIVE MOTION-DRIVEN GUIDANCE WIDGETS
+// ─────────────────────────────────────────────
+
+/// Horizontal progress gauge that travels with the user's rotation.
+/// Filled portion grows left-to-right as totalYaw approaches 360°; a
+/// glowing needle marks current position; small ticks below mark each
+/// captured frame's yaw.
+class _HorizontalProgressGauge extends StatelessWidget {
+  final ValueListenable<double> yaw;
+  final List<double> capturedYaws;
+  final double targetDeg;
+  final bool wrongDirection;
+  const _HorizontalProgressGauge({
+    required this.yaw,
+    required this.capturedYaws,
+    required this.targetDeg,
+    required this.wrongDirection,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<double>(
+      valueListenable: yaw,
+      builder: (_, v, _) {
+        return CustomPaint(
+          size: const Size.fromHeight(56),
+          painter: _ProgressGaugePainter(
+            yaw: v,
+            targetDeg: targetDeg,
+            capturedYaws: capturedYaws,
+            wrongDirection: wrongDirection,
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _ProgressGaugePainter extends CustomPainter {
+  final double yaw;
+  final double targetDeg;
+  final List<double> capturedYaws;
+  final bool wrongDirection;
+  _ProgressGaugePainter({
+    required this.yaw,
+    required this.targetDeg,
+    required this.capturedYaws,
+    required this.wrongDirection,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width;
+    final h = size.height;
+    const padX = 24.0;
+    final barY = h * 0.5;
+    final barW = w - padX * 2;
+    final barRect = RRect.fromRectAndRadius(
+      Rect.fromLTWH(padX, barY - 6, barW, 12),
+      const Radius.circular(6),
+    );
+
+    // Track
+    canvas.drawRRect(
+      barRect,
+      Paint()..color = Colors.white.withValues(alpha: 0.18),
+    );
+
+    // Major tick marks every 30°
+    final tickPaint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.35)
+      ..strokeWidth = 1.0;
+    for (int deg = 0; deg <= targetDeg.toInt(); deg += 30) {
+      final x = padX + (deg / targetDeg) * barW;
+      canvas.drawLine(
+        Offset(x, barY - 9),
+        Offset(x, barY + 9),
+        tickPaint,
+      );
+    }
+
+    // Filled portion up to current yaw
+    final clampedYaw = yaw.clamp(0.0, targetDeg).toDouble();
+    final fillW = (clampedYaw / targetDeg) * barW;
+    if (fillW > 0) {
+      canvas.save();
+      canvas.clipRRect(barRect);
+      final fillColor = wrongDirection
+          ? const Color(0xFFFF6B6B)
+          : const Color(0xFFE8735A);
+      canvas.drawRect(
+        Rect.fromLTWH(padX, barY - 6, fillW, 12),
+        Paint()
+          ..shader = LinearGradient(
+            colors: [
+              fillColor.withValues(alpha: 0.8),
+              fillColor,
+            ],
+          ).createShader(Rect.fromLTWH(padX, barY - 6, fillW, 12)),
+      );
+      canvas.restore();
+    }
+
+    // Captured-frame markers
+    for (final cy in capturedYaws) {
+      final x = padX + (cy.clamp(0.0, targetDeg) / targetDeg) * barW;
+      canvas.drawCircle(
+        Offset(x, barY + 18),
+        2.4,
+        Paint()..color = Colors.white.withValues(alpha: 0.85),
+      );
+    }
+
+    // Traveling needle at current yaw
+    final needleX = padX + (clampedYaw / targetDeg) * barW;
+    final needleColor =
+        wrongDirection ? const Color(0xFFFF6B6B) : Colors.white;
+    canvas.drawCircle(
+      Offset(needleX, barY),
+      9,
+      Paint()..color = needleColor.withValues(alpha: 0.25),
+    );
+    canvas.drawCircle(
+      Offset(needleX, barY),
+      5,
+      Paint()..color = needleColor,
+    );
+
+    // Degree label above the needle
+    final tp = TextPainter(
+      text: TextSpan(
+        text: '${clampedYaw.round()}°',
+        style: TextStyle(
+          color: Colors.white.withValues(alpha: 0.9),
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    tp.paint(canvas, Offset(needleX - tp.width / 2, barY - 28));
+  }
+
+  @override
+  bool shouldRepaint(covariant _ProgressGaugePainter old) =>
+      old.yaw != yaw ||
+      old.wrongDirection != wrongDirection ||
+      old.capturedYaws.length != capturedYaws.length;
+}
+
+/// Live spirit-level bubble. Ball drifts horizontally with phone roll;
+/// glows green when within ±2°.
+class _TiltBubble extends StatelessWidget {
+  final ValueListenable<double> roll;
+  const _TiltBubble({required this.roll});
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<double>(
+      valueListenable: roll,
+      builder: (_, r, _) {
+        return CustomPaint(
+          size: const Size(120, 18),
+          painter: _TiltBubblePainter(rollDeg: r),
+        );
+      },
+    );
+  }
+}
+
+class _TiltBubblePainter extends CustomPainter {
+  final double rollDeg;
+  _TiltBubblePainter({required this.rollDeg});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final cx = size.width / 2;
+    final cy = size.height / 2;
+    // Track
+    final trackRect = RRect.fromRectAndRadius(
+      Rect.fromLTWH(8, cy - 5, size.width - 16, 10),
+      const Radius.circular(5),
+    );
+    canvas.drawRRect(
+      trackRect,
+      Paint()..color = Colors.white.withValues(alpha: 0.18),
+    );
+    // Center marks
+    canvas.drawLine(
+      Offset(cx, cy - 7),
+      Offset(cx, cy + 7),
+      Paint()
+        ..color = Colors.white.withValues(alpha: 0.45)
+        ..strokeWidth = 1.0,
+    );
+
+    // Ball offset by roll (clamped to ±20° = full track range)
+    final norm = (rollDeg / 20.0).clamp(-1.0, 1.0);
+    final ballX = cx + norm * (size.width / 2 - 12);
+    final isLevel = rollDeg.abs() < 2.0;
+    final ballColor =
+        isLevel ? const Color(0xFF4CAF50) : Colors.white;
+    canvas.drawCircle(
+      Offset(ballX, cy),
+      isLevel ? 7 : 6,
+      Paint()..color = ballColor.withValues(alpha: 0.3),
+    );
+    canvas.drawCircle(
+      Offset(ballX, cy),
+      isLevel ? 5 : 4,
+      Paint()..color = ballColor,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _TiltBubblePainter old) =>
+      old.rollDeg != rollDeg;
+}
+
+/// Sliding "next target" reticle: starts at the right edge of the camera
+/// viewport and slides toward center as the user approaches the next
+/// capture interval. Replaces the static dot — the motion gives the user
+/// a real sense of "approach the target".
+class _NextTargetReticle extends StatelessWidget {
+  final ValueListenable<double> sinceCapture;
+  final double intervalDeg;
+  final double cameraWidth;
+  final bool wrongDirection;
+  const _NextTargetReticle({
+    required this.sinceCapture,
+    required this.intervalDeg,
+    required this.cameraWidth,
+    required this.wrongDirection,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<double>(
+      valueListenable: sinceCapture,
+      builder: (_, sc, _) {
+        // Progress 0..1 from "just captured" to "about to capture next".
+        final t = (sc / intervalDeg).clamp(0.0, 1.0);
+        // Reticle starts ~28px from right edge, ends near horizontal center.
+        final maxTravel = cameraWidth / 2 - 56;
+        final offset = maxTravel * t;
+        final scale = 1.0 + 0.3 * t;
+        return SizedBox(
+          width: cameraWidth,
+          height: 32,
+          child: Stack(
+            children: [
+              Positioned(
+                top: 0,
+                right: 28 + offset,
+                child: Transform.scale(
+                  scale: scale,
+                  child: CustomPaint(
+                    size: const Size(32, 32),
+                    painter: _ReticlePainter(
+                      progress: t,
+                      wrongDirection: wrongDirection,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _ReticlePainter extends CustomPainter {
+  final double progress;
+  final bool wrongDirection;
+  _ReticlePainter({required this.progress, required this.wrongDirection});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final c = Offset(size.width / 2, size.height / 2);
+    final color = wrongDirection
+        ? const Color(0xFFFF6B6B)
+        : Color.lerp(
+            const Color(0xFF4DD0E1),
+            const Color(0xFF4CAF50),
+            progress,
+          )!;
+
+    // Outer ring
+    canvas.drawCircle(
+      c,
+      size.width / 2 - 2,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.5
+        ..color = color,
+    );
+    // Inner pulse fill (grows with progress)
+    canvas.drawCircle(
+      c,
+      (size.width / 2 - 6) * progress,
+      Paint()..color = color.withValues(alpha: 0.45),
+    );
+    // Crosshair
+    final cross = Paint()
+      ..color = Colors.white
+      ..strokeWidth = 1.5;
+    canvas.drawLine(Offset(c.dx - 6, c.dy), Offset(c.dx + 6, c.dy), cross);
+    canvas.drawLine(Offset(c.dx, c.dy - 6), Offset(c.dx, c.dy + 6), cross);
+  }
+
+  @override
+  bool shouldRepaint(covariant _ReticlePainter old) =>
+      old.progress != progress || old.wrongDirection != wrongDirection;
+}
+
+/// Animated direction chevron — pulses outward to cue rotation direction.
+class _DirectionPulse extends StatefulWidget {
+  final bool wrongDirection;
+  const _DirectionPulse({required this.wrongDirection});
+
+  @override
+  State<_DirectionPulse> createState() => _DirectionPulseState();
+}
+
+class _DirectionPulseState extends State<_DirectionPulse>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctl = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1100),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _ctl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _ctl,
+      builder: (_, _) => CustomPaint(
+        size: const Size(56, 32),
+        painter: _DirectionPulsePainter(
+          phase: _ctl.value,
+          wrongDirection: widget.wrongDirection,
+        ),
+      ),
+    );
+  }
+}
+
+class _DirectionPulsePainter extends CustomPainter {
+  final double phase;
+  final bool wrongDirection;
+  _DirectionPulsePainter({required this.phase, required this.wrongDirection});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final color = wrongDirection
+        ? const Color(0xFFFF6B6B)
+        : const Color(0xFF4DD0E1);
+    // Three chevrons traveling rightward; each fades as it travels.
+    for (int i = 0; i < 3; i++) {
+      final p = ((phase + i / 3) % 1.0);
+      final x = size.width * p;
+      final alpha = (1.0 - p).clamp(0.0, 1.0) * 0.9;
+      final paint = Paint()
+        ..color = color.withValues(alpha: alpha)
+        ..strokeWidth = 3.0
+        ..style = PaintingStyle.stroke
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round;
+      final path = Path()
+        ..moveTo(x, 4)
+        ..lineTo(x + 10, size.height / 2)
+        ..lineTo(x, size.height - 4);
+      canvas.drawPath(path, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _DirectionPulsePainter old) =>
+      old.phase != phase || old.wrongDirection != wrongDirection;
+}
+
+/// Long horizon line that crosses the camera viewport and tilts with
+/// phone roll. Reads as a "pro app" affordance — at a glance the user
+/// knows whether the phone is straight. Glows green when within ±2°.
+class _HorizonLine extends StatelessWidget {
+  final ValueListenable<double> roll;
+  final double width;
+  const _HorizonLine({required this.roll, required this.width});
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<double>(
+      valueListenable: roll,
+      builder: (_, r, _) {
+        final isLevel = r.abs() < 2.0;
+        final color = isLevel
+            ? const Color(0xFF4CAF50)
+            : Colors.white.withValues(alpha: 0.7);
+        return Transform.rotate(
+          angle: r * math.pi / 180.0,
+          child: SizedBox(
+            width: width,
+            height: 24,
+            child: CustomPaint(
+              painter: _HorizonPainter(color: color, isLevel: isLevel),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _HorizonPainter extends CustomPainter {
+  final Color color;
+  final bool isLevel;
+  _HorizonPainter({required this.color, required this.isLevel});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final cy = size.height / 2;
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = isLevel ? 1.6 : 1.2
+      ..strokeCap = StrokeCap.round;
+
+    // Two short ticks meeting in the middle, leaving a gap so the
+    // user's eye lands on the centerline rather than a hard line
+    // across the whole frame.
+    final gap = 38.0;
+    canvas.drawLine(
+      Offset(0, cy),
+      Offset(size.width / 2 - gap, cy),
+      paint,
+    );
+    canvas.drawLine(
+      Offset(size.width / 2 + gap, cy),
+      Offset(size.width, cy),
+      paint,
+    );
+    // Center indicator pip
+    canvas.drawCircle(
+      Offset(size.width / 2, cy),
+      isLevel ? 3.5 : 2.5,
+      Paint()..color = color,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _HorizonPainter old) =>
+      old.color != color || old.isLevel != isLevel;
+}
+
+/// Faint frame outline that drifts from the right edge of the camera
+/// viewport toward center as the user approaches the next capture.
+/// Bigger visual cue than the reticle for "the next shot is here".
+class _GhostFrameGuide extends StatelessWidget {
+  final ValueListenable<double> sinceCapture;
+  final double intervalDeg;
+  final double cameraWidth;
+  final double cameraHeight;
+  final bool wrongDirection;
+  const _GhostFrameGuide({
+    required this.sinceCapture,
+    required this.intervalDeg,
+    required this.cameraWidth,
+    required this.cameraHeight,
+    required this.wrongDirection,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<double>(
+      valueListenable: sinceCapture,
+      builder: (_, sc, _) {
+        final t = (sc / intervalDeg).clamp(0.0, 1.0);
+        // Ghost is about 60% of viewport size, drifts from far-right
+        // (offset = cameraWidth * 0.55) to centered (offset = 0).
+        final maxOffset = cameraWidth * 0.55;
+        final offsetX = maxOffset * (1.0 - t);
+        final ghostW = cameraWidth * 0.6;
+        final ghostH = cameraHeight * 0.6;
+        final color = wrongDirection
+            ? const Color(0xFFFF6B6B)
+            : Color.lerp(
+                Colors.white.withValues(alpha: 0.35),
+                const Color(0xFF4CAF50).withValues(alpha: 0.85),
+                t,
+              )!;
+        return SizedBox(
+          width: cameraWidth,
+          height: cameraHeight,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              Transform.translate(
+                offset: Offset(offsetX, 0),
+                child: Container(
+                  width: ghostW,
+                  height: ghostH,
+                  decoration: BoxDecoration(
+                    border: Border.all(color: color, width: 2.0),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

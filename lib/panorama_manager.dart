@@ -292,7 +292,7 @@ class _PanoramaManagerScreenState extends State<PanoramaManagerScreen> {
                       child: Image.file(
                         File(file.path),
                         fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => Container(
+                        errorBuilder: (_, _, _) => Container(
                           color: Colors.grey[300],
                           child: const Icon(Icons.broken_image,
                               size: 40, color: Colors.grey),
@@ -577,14 +577,14 @@ class _PanoramaManagerScreenState extends State<PanoramaManagerScreen> {
     Navigator.push(
       context,
       PageRouteBuilder(
-        pageBuilder: (_, __, ___) => _PanoramaFullScreenViewer(
+        pageBuilder: (_, _, _) => _PanoramaFullScreenViewer(
           item: room,
           index: index,
           total: _rooms.length,
         ),
         transitionDuration: _kTransitionDuration,
         reverseTransitionDuration: _kTransitionDuration,
-        transitionsBuilder: (_, animation, __, child) {
+        transitionsBuilder: (_, animation, _, child) {
           return FadeTransition(
             opacity: animation,
             child: SlideTransition(
@@ -1053,14 +1053,14 @@ class _PanoramaManagerScreenState extends State<PanoramaManagerScreen> {
       return Image.file(
         File(item.localFile!.path),
         fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => _placeholderThumb(),
+        errorBuilder: (_, _, _) => _placeholderThumb(),
       );
     }
     if (item.url != null && item.url!.isNotEmpty) {
       return Image.network(
         item.url!,
         fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => _placeholderThumb(),
+        errorBuilder: (_, _, _) => _placeholderThumb(),
       );
     }
     return _placeholderThumb();
@@ -1391,7 +1391,7 @@ class _PanoramaFullScreenViewerState extends State<_PanoramaFullScreenViewer> {
         File(item.localFile!.path),
         fit: BoxFit.cover,
         semanticLabel: '360° view of ${item.roomLabel}',
-        errorBuilder: (_, __, ___) {
+        errorBuilder: (_, _, _) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted) setState(() => _hasError = true);
           });
@@ -1403,7 +1403,7 @@ class _PanoramaFullScreenViewerState extends State<_PanoramaFullScreenViewer> {
       item.url ?? '',
       fit: BoxFit.cover,
       semanticLabel: '360° view of ${item.roomLabel}',
-      errorBuilder: (_, __, ___) {
+      errorBuilder: (_, _, _) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) setState(() => _hasError = true);
         });

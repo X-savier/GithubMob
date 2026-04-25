@@ -751,3 +751,332 @@ Future<bool> hasAppliedToListing(String listingId) async {
     return false;
   }
 }
+
+/// Returns the current tenant's application id+status for a listing, or
+/// null if none. Used by unit_details to decide which CTA to show.
+Future<({String id, String status})?> getMyApplicationForListing(
+    String listingId) async {
+  try {
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    if (userId == null) return null;
+    final data = await Supabase.instance.client
+        .from('application')
+        .select('id, status')
+        .eq('listing_id', listingId)
+        .eq('tenant_id', userId)
+        .maybeSingle();
+    if (data == null) return null;
+    return (
+      id: data['id'].toString(),
+      status: (data['status'] ?? 'pending').toString(),
+    );
+  } catch (e) {
+    debugPrint('getMyApplicationForListing ERROR: $e');
+    return null;
+  }
+}
+
+// ─────────────────────────────────────────────
+// CONTRACT (post-approval lease/rent agreement)
+// ─────────────────────────────────────────────
+
+/// Get-or-create the contract row for a given approved application.
+/// On first call we create a row with status='draft' and copy the
+/// listing's listing_type so the renderer knows which template to use.
+Future<Map<String, dynamic>?> getOrCreateContract({
+  required String applicationId,
+  required String listingId,
+  required String tenantId,
+  required String landlordId,
+}) async {
+  if (applicationId.isEmpty ||
+      listingId.isEmpty ||
+      tenantId.isEmpty ||
+      landlordId.isEmpty) {
+    debugPrint('getOrCreateContract: refusing call with empty id '
+        '(application=$applicationId listing=$listingId '
+        'tenant=$tenantId landlord=$landlordId)');
+    return null;
+  }
+  final supa = Supabase.instance.client;
+  try {
+    final existing = await supa
+        .from('contract')
+        .select()
+        .eq('application_id', applicationId)
+        .maybeSingle();
+    if (existing != null) return Map<String, dynamic>.from(existing);
+
+    // Pull listing_type from listings (defaults to 'lease' if not set).
+    final listing = await supa
+        .from('listings')
+        .select('listing_type')
+        .eq('id', listingId)
+        .maybeSingle();
+    final listingType =
+        (listing?['listing_type'] ?? 'lease').toString();
+
+    final inserted = await supa
+        .from('contract')
+        .insert({
+          'application_id': applicationId,
+          'listing_id': listingId,
+          'tenant_id': tenantId,
+          'landlord_id': landlordId,
+          'listing_type': listingType,
+          'status': 'awaiting_tenant',
+        })
+        .select()
+        .single();
+    return Map<String, dynamic>.from(inserted);
+  } catch (e) {
+    debugPrint('getOrCreateContract ERROR: $e');
+    rethrow;
+  }
+}
+
+/// Persist the tenant's signature (raw stroke JSON + printed name).
+/// Advances status to 'awaiting_landlord'.
+Future<bool> signContractAsTenant({
+  required String contractId,
+  required String signaturePayload,
+  required String printedName,
+}) async {
+  try {
+    await Supabase.instance.client.from('contract').update({
+      'tenant_signature': signaturePayload,
+      'tenant_signed_name': printedName,
+      'tenant_signed_at': DateTime.now().toIso8601String(),
+      'status': 'awaiting_landlord',
+    }).eq('id', contractId);
+    return true;
+  } catch (e) {
+    debugPrint('signContractAsTenant ERROR: $e');
+    return false;
+  }
+}
+
+/// Persist the landlord's signature. Advances status to 'fully_signed'.
+Future<bool> signContractAsLandlord({
+  required String contractId,
+  required String signaturePayload,
+  required String printedName,
+}) async {
+  try {
+    await Supabase.instance.client.from('contract').update({
+      'landlord_signature': signaturePayload,
+      'landlord_signed_name': printedName,
+      'landlord_signed_at': DateTime.now().toIso8601String(),
+      'status': 'fully_signed',
+    }).eq('id', contractId);
+    return true;
+  } catch (e) {
+    debugPrint('signContractAsLandlord ERROR: $e');
+    return false;
+  }
+}
+
+/// Record a successful Stripe sandbox payment against a contract.
+Future<bool> recordPayment({
+  required String contractId,
+  required String paymentIntentId,
+  required int amountCents,
+  required String currency,
+}) async {
+  try {
+    await Supabase.instance.client.from('payment').insert({
+      'contract_id': contractId,
+      'stripe_payment_intent_id': paymentIntentId,
+      'amount_cents': amountCents,
+      'currency': currency,
+      'status': 'succeeded',
+      'paid_at': DateTime.now().toIso8601String(),
+    });
+    await Supabase.instance.client
+        .from('contract')
+        .update({'status': 'paid'}).eq('id', contractId);
+    return true;
+  } catch (e) {
+    debugPrint('recordPayment ERROR: $e');
+    return false;
+  }
+}
+
+/// The tenant's currently-active rental — the most recent contract
+/// with status='paid'. Includes pricing + listing core fields so the
+/// in-stay dashboard can render move-in info, next due date, etc.
+Future<Map<String, dynamic>?> fetchMyActiveRental() async {
+  try {
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    if (userId == null) return null;
+    final contract = await Supabase.instance.client
+        .from('contract')
+        .select('id, status, listing_id, application_id, listing_type, '
+            'tenant_signed_at, landlord_signed_at, '
+            'listings(id, title, landlord_id)')
+        .eq('tenant_id', userId)
+        .eq('status', 'paid')
+        .order('landlord_signed_at', ascending: false)
+        .limit(1)
+        .maybeSingle();
+    if (contract == null) return null;
+    final c = Map<String, dynamic>.from(contract);
+    final listingId = c['listing_id']?.toString();
+    if (listingId != null) {
+      final fin = await Supabase.instance.client
+          .from('listing_financials')
+          .select('monthly_rent, security_deposit, advance_payment')
+          .eq('listing_id', listingId)
+          .maybeSingle();
+      if (fin != null) c.addAll(Map<String, dynamic>.from(fin));
+      final avail = await Supabase.instance.client
+          .from('listing_availability')
+          .select('available_from, lease_term')
+          .eq('listing_id', listingId)
+          .maybeSingle();
+      if (avail != null) c.addAll(Map<String, dynamic>.from(avail));
+      final loc = await Supabase.instance.client
+          .from('listing_locations')
+          .select('full_address, city, province')
+          .eq('listing_id', listingId)
+          .maybeSingle();
+      if (loc != null) c.addAll(Map<String, dynamic>.from(loc));
+    }
+    final mostRecentPayment = await Supabase.instance.client
+        .from('payment')
+        .select('paid_at, amount_cents')
+        .eq('contract_id', c['id'])
+        .order('paid_at', ascending: false)
+        .limit(1)
+        .maybeSingle();
+    if (mostRecentPayment != null) {
+      c['last_paid_at'] = mostRecentPayment['paid_at'];
+      c['last_paid_cents'] = mostRecentPayment['amount_cents'];
+    }
+    return c;
+  } catch (e) {
+    debugPrint('fetchMyActiveRental ERROR: $e');
+    return null;
+  }
+}
+
+/// Landlord's active tenants — every contract with status='paid' the
+/// landlord owns, joined with tenant info from the application row.
+Future<List<Map<String, dynamic>>> fetchActiveTenants() async {
+  try {
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    if (userId == null) return [];
+    final data = await Supabase.instance.client
+        .from('contract')
+        .select('id, status, listing_id, application_id, '
+            'tenant_signed_at, landlord_signed_at, '
+            'listings(title), '
+            'application(first_name, last_name, email, phone_number)')
+        .eq('landlord_id', userId)
+        .eq('status', 'paid')
+        .order('landlord_signed_at', ascending: false);
+    return (data as List).cast<Map<String, dynamic>>();
+  } catch (e) {
+    debugPrint('fetchActiveTenants ERROR: $e');
+    return [];
+  }
+}
+
+/// All payments the current tenant has made, joined with the contract
+/// and listing so the UI can render meaningful descriptions. Drives
+/// the Transaction History section on the payment screen.
+Future<List<Map<String, dynamic>>> fetchMyPaymentsWithContext() async {
+  try {
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    if (userId == null) return [];
+    final data = await Supabase.instance.client
+        .from('payment')
+        .select('id, amount_cents, currency, status, paid_at, '
+            'stripe_payment_intent_id, contract_id, '
+            'contract!inner(id, tenant_id, listing_id, '
+            'listings(title))')
+        .eq('contract.tenant_id', userId)
+        .order('paid_at', ascending: false);
+    return (data as List).cast<Map<String, dynamic>>();
+  } catch (e) {
+    debugPrint('fetchMyPaymentsWithContext ERROR: $e');
+    return [];
+  }
+}
+
+/// The next contract the tenant should pay — first row with
+/// status='fully_signed' (and not yet paid) ordered by signing date.
+/// Returns null when nothing is due.
+Future<Map<String, dynamic>?> fetchMyNextDueContract() async {
+  try {
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    if (userId == null) return null;
+    final data = await Supabase.instance.client
+        .from('contract')
+        .select('id, status, listing_id, application_id, '
+            'landlord_signed_at, listing_type, '
+            'listings(id, title)')
+        .eq('tenant_id', userId)
+        .eq('status', 'fully_signed')
+        .order('landlord_signed_at', ascending: true)
+        .limit(1)
+        .maybeSingle();
+    if (data == null) return null;
+    final c = Map<String, dynamic>.from(data);
+    // Pull pricing from listing_financials for the listing.
+    final listingId = c['listing_id']?.toString();
+    if (listingId != null) {
+      final financials = await Supabase.instance.client
+          .from('listing_financials')
+          .select('monthly_rent, security_deposit, advance_payment')
+          .eq('listing_id', listingId)
+          .maybeSingle();
+      if (financials != null) c.addAll(Map<String, dynamic>.from(financials));
+    }
+    return c;
+  } catch (e) {
+    debugPrint('fetchMyNextDueContract ERROR: $e');
+    return null;
+  }
+}
+
+/// Landlord's contract queue — every contract where they are the
+/// landlord party. Drives the Tenant Contracts inbox on the landlord
+/// profile.
+Future<List<Map<String, dynamic>>> fetchLandlordContracts() async {
+  try {
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    if (userId == null) return [];
+    final data = await Supabase.instance.client
+        .from('contract')
+        .select('id, status, listing_id, application_id, '
+            'tenant_signed_at, landlord_signed_at, listing_type, '
+            'listings(id, title), '
+            'application(first_name, last_name)')
+        .eq('landlord_id', userId)
+        .order('tenant_signed_at', ascending: true);
+    return (data as List).cast<Map<String, dynamic>>();
+  } catch (e) {
+    debugPrint('fetchLandlordContracts ERROR: $e');
+    return [];
+  }
+}
+
+/// Tenant's full application list with the listing title joined in.
+/// Drives the My Applications inbox screen.
+Future<List<Map<String, dynamic>>> fetchMyApplicationsWithListing() async {
+  try {
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    if (userId == null) return [];
+    final data = await Supabase.instance.client
+        .from('application')
+        .select('id, status, submitted_at, listing_id, '
+            'listings(id, title, monthly_rent, landlord_id)')
+        .eq('tenant_id', userId)
+        .order('submitted_at', ascending: false);
+    return (data as List).cast<Map<String, dynamic>>();
+  } catch (e) {
+    debugPrint('fetchMyApplicationsWithListing ERROR: $e');
+    return [];
+  }
+}

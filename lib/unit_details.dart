@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'contract_view_screen.dart';
 import 'panorama_tour_viewer.dart';
 import 'profile_screen.dart';
 import 'property_data.dart';
@@ -25,6 +26,7 @@ class _UnitDetailsScreenState extends State<UnitDetailsScreen> {
   List<String> _amenities = [];
   List<TourRoom> _panoramaRooms = [];
   bool _isLoading = true;
+  ({String id, String status})? _myApp;
 
   Property get p => widget.property;
 
@@ -32,6 +34,83 @@ class _UnitDetailsScreenState extends State<UnitDetailsScreen> {
   void initState() {
     super.initState();
     _loadDetails();
+    _refreshApplicationStatus();
+  }
+
+  Future<void> _refreshApplicationStatus() async {
+    if (p.id == null) return;
+    final res = await getMyApplicationForListing(p.id!);
+    if (mounted) setState(() => _myApp = res);
+  }
+
+  Widget _buildApplyOrContractCta() {
+    final status = _myApp?.status;
+    String label;
+    Color bg;
+    VoidCallback? onPressed;
+
+    switch (status) {
+      case 'approved':
+        label = 'View Contract';
+        bg = const Color(0xFF4CAF50);
+        onPressed = () async {
+          await Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => ContractViewScreen(
+                applicationId: _myApp!.id,
+                listingId: p.id!,
+                landlordId: p.landlordId ?? '',
+              ),
+            ),
+          );
+          _refreshApplicationStatus();
+        };
+        break;
+      case 'pending':
+        label = 'Application Pending';
+        bg = Colors.grey.shade400;
+        onPressed = null;
+        break;
+      case 'rejected':
+        label = 'Apply Again';
+        bg = const Color(0xfff36c6c);
+        onPressed = () => _openApplicationForm();
+        break;
+      default:
+        label = 'Apply Now';
+        bg = const Color(0xfff36c6c);
+        onPressed = () => _openApplicationForm();
+    }
+
+    return ElevatedButton(
+      onPressed: onPressed,
+      style: ElevatedButton.styleFrom(
+        backgroundColor: bg,
+        foregroundColor: Colors.white,
+        disabledBackgroundColor: Colors.grey.shade400,
+        disabledForegroundColor: Colors.white,
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(25)),
+        padding:
+            const EdgeInsets.symmetric(horizontal: 30, vertical: 15),
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+      ),
+    );
+  }
+
+  Future<void> _openApplicationForm() async {
+    if (p.id == null) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => RentalApplicationScreen(listingId: p.id!),
+      ),
+    );
+    _refreshApplicationStatus();
   }
 
   Future<void> _loadDetails() async {
@@ -187,39 +266,7 @@ class _UnitDetailsScreenState extends State<UnitDetailsScreen> {
                                     ),
                                   ),
                                   if (p.landlordId != Supabase.instance.client.auth.currentUser?.id)
-                                  ElevatedButton(
-                                    onPressed: () {
-                                      if (p.id != null) {
-                                        Navigator.push(
-                                          context,
-                                          MaterialPageRoute(
-                                            builder: (_) => RentalApplicationScreen(
-                                              listingId: p.id!,
-                                            ),
-                                          ),
-                                        );
-                                      }
-                                    },
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: const Color(0xfff36c6c),
-                                      foregroundColor: Colors.white,
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius:
-                                            BorderRadius.circular(25),
-                                      ),
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 30,
-                                        vertical: 15,
-                                      ),
-                                    ),
-                                    child: const Text(
-                                      "Apply Now",
-                                      style: TextStyle(
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ),
+                                    _buildApplyOrContractCta(),
                                 ],
                               ),
                               const SizedBox(height: 20),

@@ -186,16 +186,81 @@ class PanoramaPostProcessor {
     if ((ratio - 2.0).abs() < 0.1) return image;
 
     if (ratio > 2.0) {
-      // Too wide → crop horizontally (center-crop)
-      final newW = h * 2;
-      final x = (w - newW) ~/ 2;
-      return img.copyCrop(image, x: x, y: 0, width: newW, height: h);
+      // Too wide → PAD top and bottom (don't crop — that destroys the
+      // panorama). A single-row sweep can't capture poles, so we fill
+      // the missing zenith/nadir with the average color of the captured
+      // top/bottom edges. Reads as plausible sky/floor in the viewer
+      // instead of a stretched, distorted image.
+      final targetH = w ~/ 2;
+      final padTotal = targetH - h;
+      final padTop = padTotal ~/ 2;
+
+      final topColor = _averageRowColor(image, 0, math.min(4, h));
+      final botColor = _averageRowColor(image, math.max(0, h - 4), h);
+
+      final canvas = img.Image(width: w, height: targetH);
+      img.fillRect(canvas,
+          x1: 0, y1: 0, x2: w - 1, y2: padTop - 1, color: topColor);
+      img.fillRect(canvas,
+          x1: 0,
+          y1: padTop + h,
+          x2: w - 1,
+          y2: targetH - 1,
+          color: botColor);
+      img.compositeImage(canvas, image, dstX: 0, dstY: padTop);
+      return canvas;
     } else {
-      // Too tall → crop vertically (center-crop)
-      final newH = w ~/ 2;
-      final y = (h - newH) ~/ 2;
-      return img.copyCrop(image, x: 0, y: y, width: w, height: newH);
+      // Too tall → pad left/right with edge color. Rare case.
+      final targetW = h * 2;
+      final padTotal = targetW - w;
+      final padLeft = padTotal ~/ 2;
+
+      final leftColor = _averageColumnColor(image, 0, math.min(4, w));
+      final rightColor =
+          _averageColumnColor(image, math.max(0, w - 4), w);
+
+      final canvas = img.Image(width: targetW, height: h);
+      img.fillRect(canvas,
+          x1: 0, y1: 0, x2: padLeft - 1, y2: h - 1, color: leftColor);
+      img.fillRect(canvas,
+          x1: padLeft + w,
+          y1: 0,
+          x2: targetW - 1,
+          y2: h - 1,
+          color: rightColor);
+      img.compositeImage(canvas, image, dstX: padLeft, dstY: 0);
+      return canvas;
     }
+  }
+
+  static img.Color _averageRowColor(img.Image image, int y0, int y1) {
+    int r = 0, g = 0, b = 0, count = 0;
+    for (int y = y0; y < y1; y++) {
+      for (int x = 0; x < image.width; x++) {
+        final p = image.getPixel(x, y);
+        r += p.r.toInt();
+        g += p.g.toInt();
+        b += p.b.toInt();
+        count++;
+      }
+    }
+    if (count == 0) return img.ColorRgb8(0, 0, 0);
+    return img.ColorRgb8(r ~/ count, g ~/ count, b ~/ count);
+  }
+
+  static img.Color _averageColumnColor(img.Image image, int x0, int x1) {
+    int r = 0, g = 0, b = 0, count = 0;
+    for (int x = x0; x < x1; x++) {
+      for (int y = 0; y < image.height; y++) {
+        final p = image.getPixel(x, y);
+        r += p.r.toInt();
+        g += p.g.toInt();
+        b += p.b.toInt();
+        count++;
+      }
+    }
+    if (count == 0) return img.ColorRgb8(0, 0, 0);
+    return img.ColorRgb8(r ~/ count, g ~/ count, b ~/ count);
   }
 }
 

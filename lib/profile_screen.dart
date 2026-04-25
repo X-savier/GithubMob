@@ -6,7 +6,10 @@ import 'tenantmanagement_screen.dart';
 import 'report_management_screen.dart';
 import 'payment_screen.dart';
 import 'enlistment_application.dart';
+import 'in_stay_dashboard_screen.dart';
+import 'landlord_contracts_screen.dart';
 import 'login_screen.dart';
+import 'my_applications_screen.dart';
 import 'profile_information_screen.dart';
 import 'house_enlistment_screen.dart';
 import 'property_data.dart';
@@ -628,6 +631,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 );
               },
             ),
+            _buildDivider(),
+            _buildMenuItem(
+              icon: Icons.description_outlined,
+              title: 'Tenant Contracts',
+              subtitle: 'View & sign approved contracts',
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const LandlordContractsScreen(),
+                  ),
+                );
+              },
+            ),
           ],
           _buildDivider(),
           _buildMenuItem(
@@ -639,6 +656,34 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 context,
                 MaterialPageRoute(
                   builder: (_) => const ReportManagementScreen(),
+                ),
+              );
+            },
+          ),
+          _buildDivider(),
+          _buildMenuItem(
+            icon: Icons.home_outlined,
+            title: 'My Rental',
+            subtitle: 'Active stay & next payment',
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const InStayDashboardScreen(),
+                ),
+              );
+            },
+          ),
+          _buildDivider(),
+          _buildMenuItem(
+            icon: Icons.assignment_outlined,
+            title: 'My Applications',
+            subtitle: 'Track approvals & contracts',
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const MyApplicationsScreen(),
                 ),
               );
             },
