@@ -39,7 +39,7 @@ void main() {
             : 'POOR';
 
     print('  maxFrames=$maxFrames: '
-        '${effectiveFrames} frames, '
+        '$effectiveFrames frames, '
         'max gap=${maxGap.toStringAsFixed(0)}°, '
         'overlap=${overlapPercent.toStringAsFixed(0)}% '
         '[$quality]');
@@ -62,7 +62,7 @@ void main() {
                 : 'BAD';
 
     print('  interval=${interval.toInt()}°: '
-        '${framesFor360} frames for 360°, '
+        '$framesFor360 frames for 360°, '
         '${overlapPercent.toStringAsFixed(0)}% overlap '
         '[$quality]');
   }

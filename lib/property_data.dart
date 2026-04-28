@@ -902,6 +902,146 @@ Future<bool> recordPayment({
   }
 }
 
+// ─────────────────────────────────────────────
+// REPORTS (maintenance / cleaning / etc.)
+// ─────────────────────────────────────────────
+
+/// Submit a new report. Tenant-only (RLS enforces auth.uid()=tenant_id).
+/// Returns the inserted row id, or null on failure.
+Future<String?> submitReport({
+  required String contractId,
+  required String listingId,
+  required String tenantId,
+  required String landlordId,
+  required String type,
+  required String priority,
+  required String title,
+  String? description,
+}) async {
+  try {
+    final inserted = await Supabase.instance.client
+        .from('report')
+        .insert({
+          'contract_id': contractId,
+          'listing_id': listingId,
+          'tenant_id': tenantId,
+          'landlord_id': landlordId,
+          'type': type,
+          'priority': priority,
+          'title': title,
+          'description': description,
+          'status': 'open',
+        })
+        .select('id')
+        .single();
+    return inserted['id'].toString();
+  } catch (e) {
+    debugPrint('submitReport ERROR: $e');
+    return null;
+  }
+}
+
+/// Update a report's status. Either party may call.
+Future<bool> updateReportStatus({
+  required String reportId,
+  required String newStatus,
+}) async {
+  try {
+    final patch = <String, dynamic>{'status': newStatus};
+    if (newStatus == 'resolved') {
+      patch['resolved_at'] = DateTime.now().toIso8601String();
+    }
+    await Supabase.instance.client
+        .from('report')
+        .update(patch)
+        .eq('id', reportId);
+    return true;
+  } catch (e) {
+    debugPrint('updateReportStatus ERROR: $e');
+    return false;
+  }
+}
+
+/// Landlord posts a response message on a report. Sets responded_at.
+Future<bool> respondToReport({
+  required String reportId,
+  required String response,
+}) async {
+  try {
+    await Supabase.instance.client.from('report').update({
+      'landlord_response': response,
+      'landlord_responded_at': DateTime.now().toIso8601String(),
+    }).eq('id', reportId);
+    return true;
+  } catch (e) {
+    debugPrint('respondToReport ERROR: $e');
+    return false;
+  }
+}
+
+/// Tenant-side report list — every report this tenant has filed.
+/// Joined with listing title for display.
+Future<List<Map<String, dynamic>>> fetchMyReports() async {
+  try {
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    if (userId == null) return [];
+    final data = await Supabase.instance.client
+        .from('report')
+        .select('id, type, priority, status, title, description, '
+            'landlord_response, landlord_responded_at, resolved_at, '
+            'created_at, listing_id, contract_id, '
+            'listings(title)')
+        .eq('tenant_id', userId)
+        .order('created_at', ascending: false);
+    return (data as List).cast<Map<String, dynamic>>();
+  } catch (e) {
+    debugPrint('fetchMyReports ERROR: $e');
+    return [];
+  }
+}
+
+/// Landlord-side report queue — every report against the landlord's
+/// listings. Joined with listing title and tenant name.
+Future<List<Map<String, dynamic>>> fetchLandlordReports() async {
+  try {
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    if (userId == null) return [];
+    final data = await Supabase.instance.client
+        .from('report')
+        .select('id, type, priority, status, title, description, '
+            'landlord_response, landlord_responded_at, resolved_at, '
+            'created_at, listing_id, contract_id, tenant_id, '
+            'listings(title), '
+            'application!contract_id_application(first_name, last_name)')
+        .eq('landlord_id', userId)
+        .order('created_at', ascending: false);
+    return (data as List).cast<Map<String, dynamic>>();
+  } catch (e) {
+    // The application join uses an inferred relationship name that may
+    // differ; fall back to a simpler fetch and look up the application
+    // name client-side via a second query if needed.
+    debugPrint('fetchLandlordReports primary ERROR: $e — trying fallback');
+    try {
+      final userId = Supabase.instance.client.auth.currentUser?.id;
+      if (userId == null) return [];
+      final rows = await Supabase.instance.client
+          .from('report')
+          .select('id, type, priority, status, title, description, '
+              'landlord_response, landlord_responded_at, resolved_at, '
+              'created_at, listing_id, contract_id, tenant_id, '
+              'listings(title), '
+              'contract!contract_id(application_id, '
+              'application(first_name, last_name))')
+          .eq('landlord_id', userId)
+          .order('created_at', ascending: false);
+      return (rows as List).cast<Map<String, dynamic>>();
+    } catch (e2) {
+      debugPrint('fetchLandlordReports fallback ERROR: $e2');
+      return [];
+    }
+  }
+}
+
 /// The tenant's currently-active rental — the most recent contract
 /// with status='paid'. Includes pricing + listing core fields so the
 /// in-stay dashboard can render move-in info, next due date, etc.
@@ -962,20 +1102,56 @@ Future<Map<String, dynamic>?> fetchMyActiveRental() async {
 
 /// Landlord's active tenants — every contract with status='paid' the
 /// landlord owns, joined with tenant info from the application row.
+/// Each row also gets a `tenant_profile` map with avatar_url + full_name
+/// pulled in a follow-up batched query (Supabase doesn't auto-join the
+/// auth-user backed `profiles` table through `tenant_id` on `contract`).
 Future<List<Map<String, dynamic>>> fetchActiveTenants() async {
   try {
     final userId = Supabase.instance.client.auth.currentUser?.id;
     if (userId == null) return [];
     final data = await Supabase.instance.client
         .from('contract')
-        .select('id, status, listing_id, application_id, '
+        .select('id, status, tenant_id, listing_id, application_id, '
             'tenant_signed_at, landlord_signed_at, '
             'listings(title), '
             'application(first_name, last_name, email, phone_number)')
         .eq('landlord_id', userId)
         .eq('status', 'paid')
         .order('landlord_signed_at', ascending: false);
-    return (data as List).cast<Map<String, dynamic>>();
+    // Supabase rows can be unmodifiable — copy each into a mutable map
+    // so we can splice the joined profile in.
+    final rows = (data as List)
+        .map((r) => Map<String, dynamic>.from(r as Map))
+        .toList();
+
+    // Batch-fetch tenant profile rows for avatars.
+    final tenantIds = rows
+        .map((r) => r['tenant_id']?.toString())
+        .whereType<String>()
+        .toSet()
+        .toList();
+    if (tenantIds.isNotEmpty) {
+      try {
+        final profiles = await Supabase.instance.client
+            .from('profiles')
+            .select('id, full_name, avatar_url')
+            .inFilter('id', tenantIds);
+        final byId = <String, Map<String, dynamic>>{
+          for (final p in (profiles as List))
+            (p as Map)['id'].toString():
+                Map<String, dynamic>.from(p),
+        };
+        for (final r in rows) {
+          final tid = r['tenant_id']?.toString();
+          if (tid != null && byId[tid] != null) {
+            r['tenant_profile'] = byId[tid];
+          }
+        }
+      } catch (e) {
+        debugPrint('fetchActiveTenants profile join ERROR: $e');
+      }
+    }
+    return rows;
   } catch (e) {
     debugPrint('fetchActiveTenants ERROR: $e');
     return [];
