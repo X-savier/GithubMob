@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
+import 'theme/vxr_theme.dart';
+import 'theme/vxr_widgets.dart';
 import 'manage_listing.dart';
+import 'verification_screen.dart';
 
 class HouseEnlistmentScreen extends StatelessWidget {
   const HouseEnlistmentScreen({super.key});
@@ -7,7 +10,7 @@ class HouseEnlistmentScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xfff5f5f5),
+      backgroundColor: VxrTokens.bg,
       body: SafeArea(
         child: SingleChildScrollView(
           child: Column(
@@ -31,14 +34,10 @@ class HouseEnlistmentScreen extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 30),
       decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xfff36c6c), Color(0xffE85D5D)],
-        ),
+        gradient: VxrTokens.brandGradient,
         borderRadius: BorderRadius.only(
-          bottomLeft: Radius.circular(30),
-          bottomRight: Radius.circular(30),
+          bottomLeft: Radius.circular(24),
+          bottomRight: Radius.circular(24),
         ),
       ),
       child: Column(
@@ -122,16 +121,10 @@ class HouseEnlistmentScreen extends StatelessWidget {
       margin: const EdgeInsets.fromLTRB(16, 20, 16, 0),
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(15),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.grey.withValues(alpha: 0.08),
-            spreadRadius: 1,
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
+        color: VxrTokens.surface,
+        borderRadius: BorderRadius.circular(VxrTokens.radius),
+        border: Border.all(color: VxrTokens.border),
+        boxShadow: VxrTokens.shadowSm,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -141,7 +134,7 @@ class HouseEnlistmentScreen extends StatelessWidget {
             style: TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.bold,
-              color: Color(0xFF1A1A2E),
+              color: VxrTokens.text,
             ),
           ),
           const SizedBox(height: 16),
@@ -186,7 +179,7 @@ class HouseEnlistmentScreen extends StatelessWidget {
           width: 36,
           height: 36,
           decoration: BoxDecoration(
-            color: const Color(0xfff36c6c),
+            color: VxrTokens.accent,
             borderRadius: BorderRadius.circular(10),
           ),
           child: Center(
@@ -213,11 +206,11 @@ class HouseEnlistmentScreen extends StatelessWidget {
                       style: const TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w600,
-                        color: Color(0xFF1A1A2E),
+                        color: VxrTokens.text,
                       ),
                     ),
                   ),
-                  Icon(icon, size: 20, color: const Color(0xfff36c6c)),
+                  Icon(icon, size: 20, color: VxrTokens.accent),
                 ],
               ),
               const SizedBox(height: 4),
@@ -242,7 +235,7 @@ class HouseEnlistmentScreen extends StatelessWidget {
       child: Container(
         width: 2,
         height: 20,
-        color: const Color(0xfff36c6c).withValues(alpha: 0.3),
+        color: VxrTokens.accent.withValues(alpha: 0.3),
       ),
     );
   }
@@ -252,16 +245,10 @@ class HouseEnlistmentScreen extends StatelessWidget {
       margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(15),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.grey.withValues(alpha: 0.08),
-            spreadRadius: 1,
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
+        color: VxrTokens.surface,
+        borderRadius: BorderRadius.circular(VxrTokens.radius),
+        border: Border.all(color: VxrTokens.border),
+        boxShadow: VxrTokens.shadowSm,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -271,7 +258,7 @@ class HouseEnlistmentScreen extends StatelessWidget {
             style: TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.bold,
-              color: Color(0xFF1A1A2E),
+              color: VxrTokens.text,
             ),
           ),
           const SizedBox(height: 16),
@@ -309,10 +296,10 @@ class HouseEnlistmentScreen extends StatelessWidget {
         Container(
           padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
-            color: const Color(0xfff36c6c).withValues(alpha: 0.1),
+            color: VxrTokens.accent.withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(12),
           ),
-          child: Icon(icon, color: const Color(0xfff36c6c), size: 22),
+          child: Icon(icon, color: VxrTokens.accent, size: 22),
         ),
         const SizedBox(width: 14),
         Expanded(
@@ -324,7 +311,7 @@ class HouseEnlistmentScreen extends StatelessWidget {
                 style: const TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
-                  color: Color(0xFF1A1A2E),
+                  color: VxrTokens.text,
                 ),
               ),
               const SizedBox(height: 2),
@@ -363,7 +350,7 @@ class HouseEnlistmentScreen extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
-                  color: Color(0xFF1A1A2E),
+                  color: VxrTokens.text,
                 ),
               ),
             ],
@@ -400,44 +387,20 @@ class HouseEnlistmentScreen extends StatelessWidget {
   Widget _buildStartButton(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: SizedBox(
-        width: double.infinity,
-        child: ElevatedButton(
-          onPressed: () async {
-            final result = await Navigator.push<bool>(
-              context,
-              MaterialPageRoute(
-                builder: (_) => const CreateListingScreen(),
-              ),
-            );
-            if (result == true && context.mounted) {
-              Navigator.pop(context, true);
-            }
-          },
-          style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xfff36c6c),
-            foregroundColor: Colors.white,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(25),
-            ),
-            padding: const EdgeInsets.symmetric(vertical: 16),
-            elevation: 2,
-          ),
-          child: const Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.add_home_rounded, size: 22),
-              SizedBox(width: 10),
-              Text(
-                'Start Listing Your Property',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ],
-          ),
-        ),
+      child: VxrPrimaryButton(
+        label: 'Start Listing Your Property',
+        icon: Icons.add_home_rounded,
+        onPressed: () async {
+          final canCreate = await ensureVerifiedToCreateListing(context);
+          if (!canCreate || !context.mounted) return;
+          final result = await Navigator.push<bool>(
+            context,
+            MaterialPageRoute(builder: (_) => const CreateListingScreen()),
+          );
+          if (result == true && context.mounted) {
+            Navigator.pop(context, true);
+          }
+        },
       ),
     );
   }

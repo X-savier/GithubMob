@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'theme/vxr_theme.dart';
 import 'contract_view_screen.dart';
 import 'property_data.dart';
 
@@ -39,15 +41,16 @@ class _LandlordContractsScreenState extends State<LandlordContractsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF7F7F8),
+      backgroundColor: VxrTokens.bg,
       appBar: AppBar(
+        flexibleSpace: const DecoratedBox(
+          decoration: BoxDecoration(gradient: VxrTokens.brandGradient),
+        ),
         title: const Text('Tenant Contracts'),
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black,
-        elevation: 0.5,
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(
+              child: CircularProgressIndicator(color: VxrTokens.accent))
           : _rows.isEmpty
               ? _emptyState()
               : RefreshIndicator(
@@ -67,17 +70,19 @@ class _LandlordContractsScreenState extends State<LandlordContractsScreen> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.assignment_outlined,
-              size: 64, color: Colors.grey.shade400),
+          const Icon(Icons.assignment_outlined,
+              size: 56, color: VxrTokens.textMuted),
           const SizedBox(height: 12),
           Text('No contracts yet',
-              style:
-                  TextStyle(color: Colors.grey.shade600, fontSize: 15)),
+              style: GoogleFonts.plusJakartaSans(
+                  color: VxrTokens.text,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700)),
           const SizedBox(height: 4),
           Text(
             'Approve a tenant application and the contract will appear here.',
             textAlign: TextAlign.center,
-            style: TextStyle(color: Colors.grey.shade500, fontSize: 12),
+            style: GoogleFonts.dmSans(color: VxrTokens.textSub, fontSize: 12),
           ),
         ],
       ),
@@ -96,11 +101,11 @@ class _LandlordContractsScreenState extends State<LandlordContractsScreen> {
     final applicationId = r['application_id']?.toString();
 
     final (badgeColor, badgeText) = switch (status) {
-      'awaiting_tenant' => (Colors.orange, 'Awaiting tenant'),
-      'awaiting_landlord' => (const Color(0xFFE85D5D), 'Sign now'),
-      'fully_signed' => (const Color(0xFF1976D2), 'Awaiting payment'),
-      'paid' => (const Color(0xFF4CAF50), 'Paid'),
-      _ => (Colors.grey, status),
+      'awaiting_tenant' => (VxrTokens.warning, 'Awaiting tenant'),
+      'awaiting_landlord' => (VxrTokens.danger, 'Sign now'),
+      'fully_signed' => (VxrTokens.accent, 'Awaiting payment'),
+      'paid' => (VxrTokens.success, 'Paid'),
+      _ => (VxrTokens.textMuted, status),
     };
 
     final canOpen = applicationId != null && listingId != null;
@@ -108,10 +113,10 @@ class _LandlordContractsScreenState extends State<LandlordContractsScreen> {
         Supabase.instance.client.auth.currentUser?.id ?? '';
 
     return Material(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(10),
+      color: VxrTokens.surface,
+      borderRadius: BorderRadius.circular(VxrTokens.radius),
       child: InkWell(
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(VxrTokens.radius),
         onTap: canOpen
             ? () async {
                 await Navigator.push(

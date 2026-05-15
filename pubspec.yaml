@@ -31,6 +31,7 @@ dependencies:
   flutter:
     sdk: flutter
   image_picker: ^1.1.2  # Add this line
+  file_picker: ^8.1.4
   google_maps_flutter: ^2.17.0
   geolocator: ^13.0.2
   http: ^1.2.1
@@ -49,10 +50,17 @@ dependencies:
   sensors_plus: ^6.1.1
   opencv_dart: ^1.4.3
   path_provider: ^2.1.0
-  flutter_stripe: ^11.4.0
+  pdf: ^3.11.1
+  printing: ^5.13.2
+  provider: ^6.1.2
+  webview_flutter: ^4.7.0
 
 dev_dependencies:
   flutter_test:
+    sdk: flutter
+
+  # E2E / integration tests run on a real device or emulator.
+  integration_test:
     sdk: flutter
 
   # The "flutter_lints" package below contains a set of recommended lints to
@@ -86,6 +94,10 @@ flutter:
       - assets/images/property9.jpg
       - assets/images/property10.jpg
       - assets/images/logo.jpg
+      - assets/psgc/regions.json
+      - assets/psgc/provinces.json
+      - assets/psgc/cities.json
+      - assets/psgc/barangays.json
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

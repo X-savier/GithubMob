@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
+import 'theme/vxr_theme.dart';
 import 'package:flutter/services.dart';
 import 'package:panorama_viewer/panorama_viewer.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-const _kPrimary = Color(0xfff36c6c);
+const _kPrimary = VxrTokens.accent;
 
 
 /// Data model for a room panorama in the tenant-side viewer.

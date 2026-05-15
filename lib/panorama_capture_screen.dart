@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'theme/vxr_theme.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
 import 'package:camerawesome/camerawesome_plugin.dart';
@@ -15,8 +16,8 @@ import 'package:path_provider/path_provider.dart';
 import 'panorama_post_processor.dart';
 import 'panorama_stitcher.dart';
 
-const _kPrimary = Color(0xfff36c6c);
-const _kCoral = Color(0xFFE8735A);
+const _kPrimary = VxrTokens.accent;
+const _kCoral = VxrTokens.gradMid;
 
 /// Guided 360° panorama capture screen using camerawesome + sensors_plus.
 ///
@@ -1998,7 +1999,7 @@ class _ProgressGaugePainter extends CustomPainter {
       canvas.clipRRect(barRect);
       final fillColor = wrongDirection
           ? const Color(0xFFFF6B6B)
-          : const Color(0xFFE8735A);
+          : VxrTokens.gradMid;
       canvas.drawRect(
         Rect.fromLTWH(padX, barY - 6, fillW, 12),
         Paint()

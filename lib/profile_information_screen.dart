@@ -1,12 +1,15 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'theme/vxr_theme.dart';
+import 'theme/vxr_widgets.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'auth/auth_service.dart';
+import 'verification_screen.dart';
 
 const String _mapsApiKey = 'AIzaSyAyclCsU4xb9g0i2jCEPkaM4D5bACDwXbo';
 
@@ -31,7 +34,12 @@ class _ProfileInformationScreenState extends State<ProfileInformationScreen> {
   bool _saving = false;
   DateTime? _dateOfBirth;
   String _role = 'tenant';
+  bool _isLandlord = false;
   bool _isVerified = false;
+  // Tiered AI verification state. _verificationDecision is one of
+  // 'approved' | 'manual_review' | 'rejected' | null (never submitted).
+  String? _verificationDecision;
+  String? _verificationRejectionReason;
   bool _isEmailVerified = false;
   bool _sendingEmailVerification = false;
   bool _sendingPhoneVerification = false;
@@ -65,7 +73,12 @@ class _ProfileInformationScreenState extends State<ProfileInformationScreen> {
         _phoneCtrl.text = profile['phone'] ?? '';
         _addressCtrl.text = profile['address'] ?? '';
         _role = profile['role'] ?? 'tenant';
+        _isLandlord = profile['is_landlord'] ?? false;
         _isVerified = profile['is_verified'] ?? false;
+        _verificationDecision =
+            profile['verification_decision']?.toString();
+        _verificationRejectionReason =
+            profile['verification_rejection_reason']?.toString();
         _avatarUrl = profile['avatar_url'];
         if (profile['date_of_birth'] != null) {
           _dateOfBirth = DateTime.tryParse(profile['date_of_birth']);
@@ -98,7 +111,7 @@ class _ProfileInformationScreenState extends State<ProfileInformationScreen> {
         return Theme(
           data: Theme.of(context).copyWith(
             colorScheme: const ColorScheme.light(
-              primary: Color(0xfff36c6c),
+              primary: VxrTokens.accent,
               onPrimary: Colors.white,
               surface: Colors.white,
               onSurface: Colors.black,
@@ -140,12 +153,12 @@ class _ProfileInformationScreenState extends State<ProfileInformationScreen> {
             const SizedBox(height: 8),
             if (_avatarUrl != null && _avatarUrl!.isNotEmpty)
               ListTile(
-                leading: const Icon(Icons.visibility, color: Color(0xfff36c6c)),
+                leading: const Icon(Icons.visibility, color: VxrTokens.accent),
                 title: const Text('View Profile Photo'),
                 onTap: () => Navigator.pop(ctx, 'view'),
               ),
             ListTile(
-              leading: const Icon(Icons.edit, color: Color(0xfff36c6c)),
+              leading: const Icon(Icons.edit, color: VxrTokens.accent),
               title: const Text('Change Profile Photo'),
               onTap: () => Navigator.pop(ctx, 'change'),
             ),
@@ -223,13 +236,13 @@ class _ProfileInformationScreenState extends State<ProfileInformationScreen> {
               ),
             ),
             ListTile(
-              leading: const Icon(Icons.camera_alt, color: Color(0xfff36c6c)),
+              leading: const Icon(Icons.camera_alt, color: VxrTokens.accent),
               title: const Text('Take Photo'),
               onTap: () => Navigator.pop(ctx, ImageSource.camera),
             ),
             ListTile(
               leading:
-                  const Icon(Icons.photo_library, color: Color(0xfff36c6c)),
+                  const Icon(Icons.photo_library, color: VxrTokens.accent),
               title: const Text('Choose from Gallery'),
               onTap: () => Navigator.pop(ctx, ImageSource.gallery),
             ),
@@ -251,7 +264,7 @@ class _ProfileInformationScreenState extends State<ProfileInformationScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Profile photo updated'),
-            backgroundColor: Color(0xfff36c6c),
+            backgroundColor: VxrTokens.accent,
           ),
         );
       }
@@ -277,7 +290,7 @@ class _ProfileInformationScreenState extends State<ProfileInformationScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Profile photo removed'),
-            backgroundColor: Color(0xfff36c6c),
+            backgroundColor: VxrTokens.accent,
           ),
         );
       }
@@ -380,7 +393,7 @@ class _ProfileInformationScreenState extends State<ProfileInformationScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Verification email sent. Check your inbox.'),
-            backgroundColor: Color(0xfff36c6c),
+            backgroundColor: VxrTokens.accent,
           ),
         );
       }
@@ -465,7 +478,7 @@ class _ProfileInformationScreenState extends State<ProfileInformationScreen> {
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
                   borderSide: const BorderSide(
-                    color: Color(0xfff36c6c),
+                    color: VxrTokens.accent,
                     width: 2,
                   ),
                 ),
@@ -497,7 +510,7 @@ class _ProfileInformationScreenState extends State<ProfileInformationScreen> {
               }
             },
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xfff36c6c),
+              backgroundColor: VxrTokens.accent,
               foregroundColor: Colors.white,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(10),
@@ -514,7 +527,7 @@ class _ProfileInformationScreenState extends State<ProfileInformationScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Phone number verified successfully!'),
-          backgroundColor: Color(0xfff36c6c),
+          backgroundColor: VxrTokens.accent,
         ),
       );
     }
@@ -544,7 +557,7 @@ class _ProfileInformationScreenState extends State<ProfileInformationScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Profile updated successfully'),
-            backgroundColor: Color(0xfff36c6c),
+            backgroundColor: VxrTokens.accent,
           ),
         );
         Navigator.pop(context, true); // Return true to indicate data changed
@@ -565,23 +578,16 @@ class _ProfileInformationScreenState extends State<ProfileInformationScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xfff5f5f5),
+      backgroundColor: VxrTokens.bg,
       appBar: AppBar(
-        backgroundColor: const Color(0xfff36c6c),
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () => Navigator.pop(context),
+        flexibleSpace: const DecoratedBox(
+          decoration: BoxDecoration(gradient: VxrTokens.brandGradient),
         ),
-        title: const Text(
-          'Profile Information',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-        ),
-        centerTitle: true,
+        title: const Text('Profile Information'),
       ),
       body: _loading
           ? const Center(
-              child: CircularProgressIndicator(color: Color(0xfff36c6c)),
+              child: CircularProgressIndicator(color: VxrTokens.accent),
             )
           : SingleChildScrollView(
               padding: const EdgeInsets.all(16),
@@ -617,37 +623,10 @@ class _ProfileInformationScreenState extends State<ProfileInformationScreen> {
                     const SizedBox(height: 30),
 
                     // ── Save Button ──
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed: _saving ? null : _saveProfile,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xfff36c6c),
-                          foregroundColor: Colors.white,
-                          disabledBackgroundColor:
-                              const Color(0xfff36c6c).withOpacity(0.5),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(25),
-                          ),
-                          padding: const EdgeInsets.symmetric(vertical: 15),
-                        ),
-                        child: _saving
-                            ? const SizedBox(
-                                height: 20,
-                                width: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.white,
-                                ),
-                              )
-                            : const Text(
-                                'Save Changes',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                      ),
+                    VxrPrimaryButton(
+                      label: 'Save Changes',
+                      loading: _saving,
+                      onPressed: _saveProfile,
                     ),
                     const SizedBox(height: 30),
                   ],
@@ -669,7 +648,7 @@ class _ProfileInformationScreenState extends State<ProfileInformationScreen> {
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 border: Border.all(
-                  color: const Color(0xfff36c6c),
+                  color: VxrTokens.accent,
                   width: 3,
                 ),
               ),
@@ -680,7 +659,7 @@ class _ProfileInformationScreenState extends State<ProfileInformationScreen> {
                         child: const Center(
                           child: CircularProgressIndicator(
                             strokeWidth: 2,
-                            color: Color(0xfff36c6c),
+                            color: VxrTokens.accent,
                           ),
                         ),
                       )
@@ -697,7 +676,7 @@ class _ProfileInformationScreenState extends State<ProfileInformationScreen> {
                                 child: const Center(
                                   child: CircularProgressIndicator(
                                     strokeWidth: 2,
-                                    color: Color(0xfff36c6c),
+                                    color: VxrTokens.accent,
                                   ),
                                 ),
                               );
@@ -721,7 +700,7 @@ class _ProfileInformationScreenState extends State<ProfileInformationScreen> {
               child: Container(
                 padding: const EdgeInsets.all(6),
                 decoration: const BoxDecoration(
-                  color: Color(0xfff36c6c),
+                  color: VxrTokens.accent,
                   shape: BoxShape.circle,
                 ),
                 child: const Icon(Icons.camera_alt,
@@ -749,6 +728,46 @@ class _ProfileInformationScreenState extends State<ProfileInformationScreen> {
   }
 
   Widget _buildStatusCard() {
+    // Tiered visual state: verified (green) > manual_review (yellow) >
+    // rejected (coral) > unsubmitted (orange).
+    final isManualReview =
+        !_isVerified && _verificationDecision == 'manual_review';
+    final isRejected =
+        !_isVerified && _verificationDecision == 'rejected';
+
+    final IconData icon;
+    final Color color;
+    final String title;
+    final String subtitle;
+    String? ctaLabel;
+    if (_isVerified) {
+      icon = Icons.verified_user;
+      color = Colors.green;
+      title = 'Verified Account';
+      subtitle = 'Your identity has been verified';
+    } else if (isManualReview) {
+      icon = Icons.hourglass_top_rounded;
+      color = const Color(0xffe6a700);
+      title = 'Pending admin review';
+      subtitle =
+          'Our AI flagged your submission for manual review. We will '
+          'notify you once an admin makes a decision.';
+    } else if (isRejected) {
+      icon = Icons.error_outline;
+      color = VxrTokens.accent;
+      title = 'Verification failed';
+      subtitle = _verificationRejectionReason ??
+          'Your last submission could not be verified.';
+      ctaLabel = 'Retry verification';
+    } else {
+      icon = Icons.shield_outlined;
+      color = VxrTokens.warning;
+      title = 'Unverified Account';
+      subtitle =
+          'Verify your identity to list properties or apply for rentals.';
+      ctaLabel = 'Verify now';
+    }
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -763,71 +782,105 @@ class _ProfileInformationScreenState extends State<ProfileInformationScreen> {
           ),
         ],
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: _isVerified
-                  ? Colors.green.withOpacity(0.1)
-                  : Colors.orange.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(
-              _isVerified ? Icons.verified_user : Icons.shield_outlined,
-              color: _isVerified ? Colors.green : Colors.orange,
-              size: 28,
-            ),
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(icon, color: color, size: 28),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 15,
+                        color: color,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: TextStyle(
+                          fontSize: 12, color: Colors.grey[600]),
+                    ),
+                  ],
+                ),
+              ),
+              Builder(builder: (_) {
+                // Capability flag wins over role for the visual badge.
+                final isLandlord = _isLandlord || _role == 'landlord';
+                final isAdmin = _role == 'admin';
+                final label = isLandlord
+                    ? 'Landlord'
+                    : isAdmin
+                        ? 'Admin'
+                        : 'Tenant';
+                final c = isLandlord
+                    ? VxrTokens.accent
+                    : isAdmin
+                        ? Colors.purple
+                        : Colors.blue;
+                return Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: c.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: c,
+                    ),
+                  ),
+                );
+              }),
+            ],
           ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  _isVerified ? 'Verified Account' : 'Unverified Account',
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 15,
-                    color: _isVerified ? Colors.green : Colors.orange,
+          if (ctaLabel != null) ...[
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: _openVerification,
+                icon: const Icon(Icons.verified_user_outlined,
+                    color: Colors.white, size: 18),
+                label: Text(ctaLabel),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: VxrTokens.accent,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
                   ),
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  _isVerified
-                      ? 'Your account has been verified'
-                      : 'Verify your email and phone to get verified',
-                  style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                ),
-              ],
-            ),
-          ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(
-              color: _role == 'landlord'
-                  ? const Color(0xfff36c6c).withOpacity(0.1)
-                  : _role == 'admin'
-                      ? Colors.purple.withOpacity(0.1)
-                      : Colors.blue.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Text(
-              _role[0].toUpperCase() + _role.substring(1),
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: _role == 'landlord'
-                    ? const Color(0xfff36c6c)
-                    : _role == 'admin'
-                        ? Colors.purple
-                        : Colors.blue,
               ),
             ),
-          ),
+          ],
         ],
       ),
     );
+  }
+
+  Future<void> _openVerification() async {
+    await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(builder: (_) => const VerificationScreen()),
+    );
+    if (mounted) await _loadProfile();
   }
 
   Widget _buildPersonalDetailsCard() {
@@ -953,14 +1006,14 @@ class _ProfileInformationScreenState extends State<ProfileInformationScreen> {
         Icon(
           isVerified ? Icons.check_circle : Icons.error_outline,
           size: 16,
-          color: isVerified ? Colors.green : Colors.orange,
+          color: isVerified ? VxrTokens.success : VxrTokens.warning,
         ),
         const SizedBox(width: 6),
         Text(
           isVerified ? '$label verified' : '$label not verified',
           style: TextStyle(
             fontSize: 12,
-            color: isVerified ? Colors.green : Colors.orange,
+            color: isVerified ? VxrTokens.success : VxrTokens.warning,
             fontWeight: FontWeight.w500,
           ),
         ),
@@ -972,10 +1025,10 @@ class _ProfileInformationScreenState extends State<ProfileInformationScreen> {
               onPressed: onVerify,
               style: TextButton.styleFrom(
                 padding: const EdgeInsets.symmetric(horizontal: 12),
-                foregroundColor: const Color(0xfff36c6c),
+                foregroundColor: VxrTokens.accent,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(14),
-                  side: const BorderSide(color: Color(0xfff36c6c), width: 1),
+                  side: const BorderSide(color: VxrTokens.accent, width: 1),
                 ),
               ),
               child: isSending
@@ -984,7 +1037,7 @@ class _ProfileInformationScreenState extends State<ProfileInformationScreen> {
                       height: 14,
                       child: CircularProgressIndicator(
                         strokeWidth: 2,
-                        color: Color(0xfff36c6c),
+                        color: VxrTokens.accent,
                       ),
                     )
                   : Text(
@@ -1026,13 +1079,13 @@ class _ProfileInformationScreenState extends State<ProfileInformationScreen> {
               prefixIcon: const Padding(
                 padding: EdgeInsets.only(bottom: 24),
                 child: Icon(Icons.location_on_outlined,
-                    color: Color(0xfff36c6c), size: 22),
+                    color: VxrTokens.accent, size: 22),
               ),
               prefixIconConstraints: const BoxConstraints(
                 minWidth: 48,
               ),
               filled: true,
-              fillColor: const Color(0xfff5f5f5),
+              fillColor: VxrTokens.bg,
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
                 borderSide: BorderSide.none,
@@ -1040,7 +1093,7 @@ class _ProfileInformationScreenState extends State<ProfileInformationScreen> {
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
                 borderSide: const BorderSide(
-                    color: Color(0xfff36c6c), width: 1.5),
+                    color: VxrTokens.accent, width: 1.5),
               ),
               contentPadding: const EdgeInsets.symmetric(
                   vertical: 14, horizontal: 16),
@@ -1054,8 +1107,8 @@ class _ProfileInformationScreenState extends State<ProfileInformationScreen> {
               icon: const Icon(Icons.map_outlined, size: 20),
               label: const Text('Pick from Map'),
               style: OutlinedButton.styleFrom(
-                foregroundColor: const Color(0xfff36c6c),
-                side: const BorderSide(color: Color(0xfff36c6c)),
+                foregroundColor: VxrTokens.accent,
+                side: const BorderSide(color: VxrTokens.accent),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),
@@ -1076,27 +1129,31 @@ class _ProfileInformationScreenState extends State<ProfileInformationScreen> {
     return InputDecoration(
       labelText: label,
       labelStyle: TextStyle(color: Colors.grey[600]),
-      prefixIcon: Icon(icon, color: const Color(0xfff36c6c), size: 22),
+      prefixIcon: Icon(icon, color: VxrTokens.accent, size: 22),
       suffixIcon: suffixIcon != null
           ? Icon(suffixIcon, color: Colors.grey[500], size: 20)
           : null,
       filled: true,
-      fillColor: const Color(0xfff5f5f5),
+      fillColor: VxrTokens.surface2,
       border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: BorderSide.none,
+        borderRadius: BorderRadius.circular(VxrTokens.radius),
+        borderSide: const BorderSide(color: VxrTokens.border, width: 1.5),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(VxrTokens.radius),
+        borderSide: const BorderSide(color: VxrTokens.border, width: 1.5),
       ),
       focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: Color(0xfff36c6c), width: 1.5),
+        borderRadius: BorderRadius.circular(VxrTokens.radius),
+        borderSide: const BorderSide(color: VxrTokens.accent, width: 1.5),
       ),
       errorBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: Colors.red, width: 1),
+        borderRadius: BorderRadius.circular(VxrTokens.radius),
+        borderSide: const BorderSide(color: VxrTokens.danger, width: 1),
       ),
       focusedErrorBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: Colors.red, width: 1.5),
+        borderRadius: BorderRadius.circular(VxrTokens.radius),
+        borderSide: const BorderSide(color: VxrTokens.danger, width: 1.5),
       ),
       contentPadding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
     );
@@ -1176,7 +1233,7 @@ class _MapAddressPickerState extends State<_MapAddressPicker> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: const Color(0xfff36c6c),
+        backgroundColor: VxrTokens.accent,
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.white),
@@ -1211,7 +1268,7 @@ class _MapAddressPickerState extends State<_MapAddressPicker> {
               child: Icon(
                 Icons.location_pin,
                 size: 48,
-                color: Color(0xfff36c6c),
+                color: VxrTokens.accent,
               ),
             ),
           ),
@@ -1239,7 +1296,7 @@ class _MapAddressPickerState extends State<_MapAddressPicker> {
                   Row(
                     children: [
                       const Icon(Icons.location_on,
-                          color: Color(0xfff36c6c), size: 22),
+                          color: VxrTokens.accent, size: 22),
                       const SizedBox(width: 8),
                       Expanded(
                         child: _loadingAddress
@@ -1250,7 +1307,7 @@ class _MapAddressPickerState extends State<_MapAddressPicker> {
                                     height: 16,
                                     child: CircularProgressIndicator(
                                       strokeWidth: 2,
-                                      color: Color(0xfff36c6c),
+                                      color: VxrTokens.accent,
                                     ),
                                   ),
                                   const SizedBox(width: 8),
@@ -1279,7 +1336,7 @@ class _MapAddressPickerState extends State<_MapAddressPicker> {
                           ? null
                           : () => Navigator.pop(context, _address),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xfff36c6c),
+                        backgroundColor: VxrTokens.accent,
                         foregroundColor: Colors.white,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),

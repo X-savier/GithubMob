@@ -1,26 +1,28 @@
 import 'package:flutter/material.dart';
+import 'theme/vxr_theme.dart';
 import 'application_view.dart';
 import 'property_data.dart';
 
 // ─── Colors ───────────────────────────────────────────────────────────────────
+// Re-skinned to Variation B: all coral routes through VxrTokens.
 
 class AppColors {
-  static const coral = Color(0xFFE85D5D);
-  static const coralLight = Color(0xFFFF7B7B);
-  static const background = Color(0xFFF4F4F6);
-  static const card = Colors.white;
-  static const textPrimary = Color(0xFF1A1A2E);
-  static const textSecondary = Color(0xFF6B6B80);
-  static const textHint = Color(0xFFAAAAAB);
-  static const border = Color(0xFFEEEEF2);
-  static const pendingBg = Color(0xFFFFF0E6);
-  static const pendingText = Color(0xFFE07820);
-  static const approvedBg = Color(0xFFE6F7EE);
-  static const approvedText = Color(0xFF1A9E4A);
-  static const rejectedBg = Color(0xFFFFECEC);
-  static const rejectedText = Color(0xFFD93636);
-  static const gradientStart = Color(0xFFFF7B7B);
-  static const gradientEnd = Color(0xFFE85D5D);
+  static const coral = VxrTokens.accent;
+  static const coralLight = VxrTokens.gradEnd;
+  static const background = VxrTokens.bg;
+  static const card = VxrTokens.surface;
+  static const textPrimary = VxrTokens.text;
+  static const textSecondary = VxrTokens.textSub;
+  static const textHint = VxrTokens.textMuted;
+  static const border = VxrTokens.border;
+  static const pendingBg = VxrTokens.accentSoft;
+  static const pendingText = VxrTokens.warning;
+  static const approvedBg = Color(0xFFDFF6E5);
+  static const approvedText = VxrTokens.success;
+  static const rejectedBg = Color(0xFFFCE7E7);
+  static const rejectedText = VxrTokens.danger;
+  static const gradientStart = VxrTokens.gradStart;
+  static const gradientEnd = VxrTokens.gradMid;
 }
 
 const double kRadius = 14.0;

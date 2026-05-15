@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'theme/vxr_theme.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:panorama_viewer/panorama_viewer.dart';
@@ -11,9 +12,9 @@ import 'panorama_capture_screen.dart';
 // ─────────────────────────────────────────────
 // CONSTANTS
 // ─────────────────────────────────────────────
-const _kPrimary = Color(0xfff36c6c);
-const _kCoral = Color(0xFFE8735A);
-const _kBg = Color(0xFFF5F5F5);
+const _kPrimary = VxrTokens.accent;
+const _kCoral = VxrTokens.gradMid;
+const _kBg = VxrTokens.bg;
 const _kBorderColor = Color(0xFFDEDEDE);
 const _kHintColor = Color(0xFFAAAAAA);
 const _kLabelColor = Color(0xFF333333);

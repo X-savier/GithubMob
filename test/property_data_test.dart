@@ -276,27 +276,26 @@ void main() {
       expect(propertiesByCategory(0, source: props).length, 5);
     });
 
-    test('category 1 returns studios (0 beds)', () {
+    test('category 1 returns 1BR (beds == 1)', () {
       final result = propertiesByCategory(1, source: props);
-      expect(result.length, 1);
-      expect(result.first.beds, 0);
-    });
-
-    test('category 2 returns 1BR', () {
-      final result = propertiesByCategory(2, source: props);
       expect(result.length, 1);
       expect(result.first.beds, 1);
     });
 
-    test('category 3 returns 2BR', () {
-      final result = propertiesByCategory(3, source: props);
+    test('category 2 returns 2BR (beds == 2)', () {
+      final result = propertiesByCategory(2, source: props);
       expect(result.length, 1);
       expect(result.first.beds, 2);
     });
 
-    test('category 4 returns 3+ BR', () {
-      final result = propertiesByCategory(4, source: props);
+    test('category 3 returns 3+ BR (beds >= 3)', () {
+      final result = propertiesByCategory(3, source: props);
       expect(result.length, 2); // beds 3 and 4
+    });
+
+    test('category 4 (no explicit case) returns all via default', () {
+      final result = propertiesByCategory(4, source: props);
+      expect(result.length, 5);
     });
   });
 
@@ -728,6 +727,77 @@ void main() {
 
     test('fetchLandlordListings returns Future<List<Property>>', () {
       expect(fetchLandlordListings, isA<Function>());
+    });
+  });
+
+  // ───────────────────────────────────────────
+  // nameMatchScore — used by the AI verification pipeline to
+  // cross-check the OCR'd ID name against profiles.full_name.
+  // Mirrors the Levenshtein-based helper in the verify-identity
+  // Edge Function so client-side logic stays consistent.
+  // ───────────────────────────────────────────
+  group('nameMatchScore', () {
+    test('exact match scores 1.0', () {
+      expect(nameMatchScore('Juan Dela Cruz', 'Juan Dela Cruz'), 1.0);
+    });
+
+    test('case + whitespace differences score 1.0', () {
+      expect(nameMatchScore('  juan  dela cruz ', 'JUAN Dela Cruz'), 1.0);
+    });
+
+    test('Jr suffix is ignored', () {
+      // Honorifics get stripped before comparison.
+      expect(nameMatchScore('Juan Dela Cruz Jr.', 'Juan Dela Cruz'), 1.0);
+      expect(nameMatchScore('Juan Dela Cruz', 'Juan Dela Cruz Sr'), 1.0);
+    });
+
+    test('middle-name omission scores high but not perfect', () {
+      final score = nameMatchScore(
+        'Maria Lourdes Santos',
+        'Maria Santos',
+      );
+      expect(score, greaterThan(0.5));
+      expect(score, lessThan(1.0));
+    });
+
+    test('single typo still scores high', () {
+      final score = nameMatchScore('Juan Dela Cruz', 'Juam Dela Cruz');
+      expect(score, greaterThan(0.85));
+    });
+
+    test('completely different names score low', () {
+      final score = nameMatchScore('Juan Dela Cruz', 'Pedro Penduko');
+      expect(score, lessThan(0.5));
+    });
+
+    test('empty inputs score 0', () {
+      expect(nameMatchScore('', 'Juan'), 0.0);
+      expect(nameMatchScore('Juan', ''), 0.0);
+      expect(nameMatchScore('', ''), 0.0);
+    });
+
+    test('punctuation is ignored', () {
+      // Periods, commas, hyphens are scrubbed before comparison.
+      expect(
+        nameMatchScore('Juan, Dela-Cruz.', 'Juan Dela Cruz'),
+        1.0,
+      );
+    });
+
+    test('crosses the verify-identity approve threshold (0.85) for typos',
+        () {
+      // Sanity: small ID-OCR errors must not reject legitimate users.
+      final score = nameMatchScore(
+        'Maria Lourdes Santos',
+        'Maria Lourde Santos', // missing trailing 's'
+      );
+      expect(score, greaterThanOrEqualTo(0.85));
+    });
+
+    test('falls below the verify-identity reject threshold (0.5) for '
+        'totally wrong names', () {
+      final score = nameMatchScore('Juan Dela Cruz', 'XYZ ABC DEF');
+      expect(score, lessThan(0.5));
     });
   });
 }

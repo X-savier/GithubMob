@@ -51,6 +51,8 @@ class AuthService {
         'full_name': meta['full_name'] ?? '',
         'email': user.email ?? '',
         'phone': meta['phone'] ?? '',
+        'role': 'tenant',
+        'is_landlord': false,
       });
     }
   }

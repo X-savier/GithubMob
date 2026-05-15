@@ -1,41 +1,33 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'theme/vxr_theme.dart';
 import 'property_data.dart';
 
-/// Role-aware reports screen.
-///
-/// - When the current user is the tenant on at least one paid contract,
-///   they see their own reports + a floating "+ New Report" button.
-/// - When the current user owns listings (landlord), they see every
-///   report against their properties with status controls and a
-///   response box.
-///
-/// If a user is both, both sections render.
 class ReportManagementScreen extends StatefulWidget {
   const ReportManagementScreen({super.key});
 
-  static const Color primaryOrange = Color(0xFFFF7043);
-  static const Color darkText = Color(0xFF1A1A2E);
-  static const Color lightText = Color(0xFF6B7280);
-  static const Color borderColor = Color(0xFFEEEEEE);
-  static const Color highPriority = Color(0xFFF44336);
-  static const Color mediumPriority = Color(0xFFFF9800);
-  static const Color lowPriority = Color(0xFF4CAF50);
-  static const Color statusOpen = Color(0xFFFF9800);
-  static const Color statusInProgress = Color(0xFF2196F3);
-  static const Color statusResolved = Color(0xFF4CAF50);
-  static const Color statusCancelled = Color(0xFF9E9E9E);
+  static const Color primaryOrange = VxrTokens.accent;
+  static const Color darkText = VxrTokens.text;
+  static const Color lightText = VxrTokens.textSub;
+  static const Color borderColor = VxrTokens.border;
+  static const Color highPriority = VxrTokens.danger;
+  static const Color mediumPriority = VxrTokens.warning;
+  static const Color lowPriority = VxrTokens.success;
+  static const Color statusOpen = VxrTokens.warning;
+  static const Color statusInProgress = VxrTokens.accent;
+  static const Color statusResolved = VxrTokens.success;
+  static const Color statusCancelled = VxrTokens.textMuted;
 
   @override
   State<ReportManagementScreen> createState() => _ReportManagementScreenState();
 }
 
 class _ReportManagementScreenState extends State<ReportManagementScreen>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   bool _loading = true;
   bool _isLandlord = false;
-  Map<String, dynamic>? _activeRental; // for tenant submit form
+  Map<String, dynamic>? _activeRental;
   List<Map<String, dynamic>> _myReports = [];
   List<Map<String, dynamic>> _landlordReports = [];
 
@@ -72,10 +64,7 @@ class _ReportManagementScreenState extends State<ReportManagementScreen>
       _activeRental = results[1] as Map<String, dynamic>?;
       _myReports = results[2] as List<Map<String, dynamic>>;
       _landlordReports = results[3] as List<Map<String, dynamic>>;
-      // Only build the TabController once we know how many tabs
-      // exist; otherwise dispose any prior one.
-      final tabCount =
-          (_isLandlord && _activeRental != null) ? 2 : 1;
+      final tabCount = (_isLandlord && _activeRental != null) ? 2 : 1;
       _tabs?.dispose();
       _tabs = TabController(length: tabCount, vsync: this);
       _loading = false;
@@ -88,36 +77,25 @@ class _ReportManagementScreenState extends State<ReportManagementScreen>
     return rows.where((r) {
       if (_typeFilter != 'All' &&
           (r['type']?.toString().toLowerCase() ?? '') !=
-              _typeFilter.toLowerCase()) {
-        return false;
-      }
+              _typeFilter.toLowerCase()) { return false; }
       if (_statusFilter != 'All' &&
           _normalizeStatus(r['status']?.toString()) != _statusFilter) {
         return false;
       }
       if (_priorityFilter != 'All' &&
           (r['priority']?.toString().toLowerCase() ?? '') !=
-              _priorityFilter.toLowerCase()) {
-        return false;
-      }
+              _priorityFilter.toLowerCase()) { return false; }
       return true;
     }).toList();
   }
 
-  String _normalizeStatus(String? raw) {
-    switch (raw) {
-      case 'in_progress':
-        return 'In-progress';
-      case 'open':
-        return 'Open';
-      case 'resolved':
-        return 'Resolved';
-      case 'cancelled':
-        return 'Cancelled';
-      default:
-        return raw ?? '';
-    }
-  }
+  String _normalizeStatus(String? raw) => switch (raw) {
+        'in_progress' => 'In-progress',
+        'open' => 'Open',
+        'resolved' => 'Resolved',
+        'cancelled' => 'Cancelled',
+        _ => raw ?? '',
+      };
 
   // ── Build ─────────────────────────────────────────────────────────
 
@@ -128,36 +106,24 @@ class _ReportManagementScreenState extends State<ReportManagementScreen>
     final hasBoth = hasTenantSection && hasLandlordSection;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF7F7F8),
+      backgroundColor: VxrTokens.bg,
       appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0.5,
-        title: Text(
-          'Reports',
-          style: TextStyle(
-            fontSize: 20,
-            fontWeight: FontWeight.bold,
-            color: ReportManagementScreen.primaryOrange,
-          ),
+        flexibleSpace: const DecoratedBox(
+          decoration: BoxDecoration(gradient: VxrTokens.brandGradient),
         ),
-        leading: IconButton(
-          icon: Icon(Icons.arrow_back,
-              color: ReportManagementScreen.primaryOrange),
-          onPressed: () => Navigator.pop(context),
-        ),
+        title: const Text('Reports'),
         actions: [
           IconButton(
-            icon: Icon(Icons.refresh,
-                color: ReportManagementScreen.primaryOrange),
+            icon: const Icon(Icons.refresh, color: Colors.white),
             onPressed: _loading ? null : _refresh,
           ),
         ],
         bottom: hasBoth
             ? TabBar(
                 controller: _tabs,
-                labelColor: ReportManagementScreen.primaryOrange,
-                unselectedLabelColor: ReportManagementScreen.lightText,
-                indicatorColor: ReportManagementScreen.primaryOrange,
+                labelColor: Colors.white,
+                unselectedLabelColor: Colors.white70,
+                indicatorColor: Colors.white,
                 tabs: const [
                   Tab(text: 'My Reports'),
                   Tab(text: 'Incoming'),
@@ -183,10 +149,7 @@ class _ReportManagementScreenState extends State<ReportManagementScreen>
                   child: hasBoth
                       ? TabBarView(
                           controller: _tabs,
-                          children: [
-                            _tenantList(),
-                            _landlordList(),
-                          ],
+                          children: [_tenantList(), _landlordList()],
                         )
                       : hasTenantSection
                           ? _tenantList()
@@ -206,8 +169,7 @@ class _ReportManagementScreenState extends State<ReportManagementScreen>
                 size: 72, color: Colors.grey.shade400),
             const SizedBox(height: 12),
             const Text('No reports yet',
-                style: TextStyle(
-                    fontSize: 18, fontWeight: FontWeight.bold)),
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 6),
             Text(
               'Reports will appear here once you have an active rental '
@@ -234,8 +196,7 @@ class _ReportManagementScreenState extends State<ReportManagementScreen>
           _sectionEmpty(
             icon: Icons.assignment_outlined,
             title: 'No reports yet',
-            subtitle:
-                'Tap "New Report" to file a maintenance, cleaning, or noise issue.',
+            subtitle: 'Tap "New Report" to file a maintenance, cleaning, or noise issue.',
           )
         else if (filtered.isEmpty)
           _sectionEmpty(
@@ -320,9 +281,7 @@ class _ReportManagementScreenState extends State<ReportManagementScreen>
         Expanded(
           child: _filterChip(
             value: _typeFilter,
-            options: const [
-              'All', 'Maintenance', 'Cleaning', 'Amenity', 'Noise', 'Other',
-            ],
+            options: const ['All', 'Maintenance', 'Cleaning', 'Amenity', 'Noise', 'Other'],
             onSelected: (v) => setState(() => _typeFilter = v),
             label: 'Type',
           ),
@@ -401,13 +360,8 @@ class _ReportManagementScreenState extends State<ReportManagementScreen>
 
     String? tenantName;
     if (asLandlord) {
-      final contract = (r['contract'] as Map?) ?? {};
-      final app = (contract['application'] as Map?) ??
-          (r['application'] as Map?) ??
-          {};
-      final f = app['first_name']?.toString() ?? '';
-      final l = app['last_name']?.toString() ?? '';
-      tenantName = '$f $l'.trim();
+      final profile = (r['tenant_profile'] as Map?) ?? {};
+      tenantName = profile['full_name']?.toString();
     }
 
     return Container(
@@ -435,8 +389,7 @@ class _ReportManagementScreenState extends State<ReportManagementScreen>
                   color: _typeColor(type).withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: Icon(_typeIcon(type),
-                    color: _typeColor(type), size: 20),
+                child: Icon(_typeIcon(type), color: _typeColor(type), size: 20),
               ),
               const SizedBox(width: 10),
               Expanded(
@@ -508,8 +461,7 @@ class _ReportManagementScreenState extends State<ReportManagementScreen>
                           color: Color(0xFF1565C0))),
                   const SizedBox(height: 4),
                   Text(response,
-                      style: const TextStyle(
-                          fontSize: 13, height: 1.4)),
+                      style: const TextStyle(fontSize: 13, height: 1.4)),
                 ],
               ),
             ),
@@ -546,8 +498,8 @@ class _ReportManagementScreenState extends State<ReportManagementScreen>
             label: const Text('Resolve'),
             style: OutlinedButton.styleFrom(
               foregroundColor: ReportManagementScreen.statusResolved,
-              side: const BorderSide(
-                  color: ReportManagementScreen.statusResolved),
+              side:
+                  const BorderSide(color: ReportManagementScreen.statusResolved),
             ),
           ),
         OutlinedButton.icon(
@@ -556,8 +508,8 @@ class _ReportManagementScreenState extends State<ReportManagementScreen>
           label: const Text('Respond'),
           style: OutlinedButton.styleFrom(
             foregroundColor: ReportManagementScreen.primaryOrange,
-            side:
-                const BorderSide(color: ReportManagementScreen.primaryOrange),
+            side: const BorderSide(
+                color: ReportManagementScreen.primaryOrange),
           ),
         ),
       ],
@@ -650,8 +602,7 @@ class _ReportManagementScreenState extends State<ReportManagementScreen>
           const SizedBox(height: 4),
           Text(subtitle,
               textAlign: TextAlign.center,
-              style: TextStyle(
-                  fontSize: 12, color: Colors.grey.shade600)),
+              style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
         ],
       ),
     );
@@ -776,14 +727,15 @@ class _SubmitReportSheetState extends State<_SubmitReportSheet> {
       return;
     }
     final tenantId = Supabase.instance.client.auth.currentUser?.id;
-    final landlordId =
-        widget.rental['listings']?['landlord_id']?.toString();
     final contractId = widget.rental['id']?.toString();
     final listingId = widget.rental['listing_id']?.toString();
+    final landlordId =
+        widget.rental['listings']?['landlord_id']?.toString();
+
     if (tenantId == null ||
-        landlordId == null ||
         contractId == null ||
-        listingId == null) {
+        listingId == null ||
+        landlordId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Missing rental context.')),
       );
@@ -798,7 +750,8 @@ class _SubmitReportSheetState extends State<_SubmitReportSheet> {
       type: _type,
       priority: _priority,
       title: _titleCtl.text.trim(),
-      description: _descCtl.text.trim().isEmpty ? null : _descCtl.text.trim(),
+      description:
+          _descCtl.text.trim().isEmpty ? null : _descCtl.text.trim(),
     );
     if (!mounted) return;
     setState(() => _saving = false);
@@ -819,8 +772,7 @@ class _SubmitReportSheetState extends State<_SubmitReportSheet> {
       child: Container(
         decoration: const BoxDecoration(
           color: Colors.white,
-          borderRadius:
-              BorderRadius.vertical(top: Radius.circular(20)),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
         ),
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
         child: SingleChildScrollView(
@@ -878,7 +830,8 @@ class _SubmitReportSheetState extends State<_SubmitReportSheet> {
                 ),
                 items: const [
                   DropdownMenuItem(value: 'low', child: Text('Low')),
-                  DropdownMenuItem(value: 'medium', child: Text('Medium')),
+                  DropdownMenuItem(
+                      value: 'medium', child: Text('Medium')),
                   DropdownMenuItem(value: 'high', child: Text('High')),
                 ],
                 onChanged: (v) =>

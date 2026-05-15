@@ -4,6 +4,12 @@
 <dict>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>Used to capture your government ID and a live selfie for identity verification, and to take property photos.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Used to attach photos for identity verification and property listings.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Used to save photos you capture in the app.</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>

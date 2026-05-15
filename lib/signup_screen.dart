@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:vxr_flutter/auth/auth_service.dart';
+import 'theme/vxr_theme.dart';
+import 'theme/vxr_widgets.dart';
 import 'login_screen.dart';
 
 class SignUpScreen extends StatefulWidget {
@@ -94,280 +97,203 @@ class _SignUpScreenState extends State<SignUpScreen> {
     }
   }
 
-  InputDecoration _inputDecoration(
-      String label, String hint, IconData icon) {
-    return InputDecoration(
-      labelText: label,
-      hintText: hint,
-      labelStyle: const TextStyle(color: Colors.white),
-      hintStyle: const TextStyle(color: Colors.white54),
-      prefixIcon: Icon(icon, color: Colors.white70),
-      filled: true,
-      fillColor: Colors.white.withOpacity(0.15),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
-        borderSide: BorderSide(color: Colors.white.withOpacity(0.4)),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
-        borderSide: const BorderSide(color: Colors.white, width: 2),
-      ),
-      contentPadding:
-          const EdgeInsets.symmetric(vertical: 18, horizontal: 16),
-    );
-  }
-
-  InputDecoration _passwordDecoration(
-      String label, String hint, bool obscure, VoidCallback toggle) {
-    return _inputDecoration(label, hint, Icons.lock_outline).copyWith(
-      suffixIcon: IconButton(
-        icon: Icon(
-          obscure ? Icons.visibility_off_outlined : Icons.visibility_outlined,
-          color: Colors.white70,
-        ),
-        onPressed: toggle,
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
+    final t = VxrTheme.of(context);
     return Scaffold(
       resizeToAvoidBottomInset: true,
       body: Container(
         width: double.infinity,
         height: double.infinity,
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Color(0xFFFF7043), Color(0xFFFF8A80)],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-        ),
-        child: SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                /// Back Button
-                IconButton(
-                  icon: const Icon(Icons.arrow_back_ios_new,
-                      color: Colors.white, size: 22),
-                  onPressed: () => Navigator.pop(context),
-                ),
-
-                const SizedBox(height: 16),
-
-                /// Logo Row
-                Row(
-                  children: [
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(14),
-                      child: Image.asset(
-                        'assets/images/logo.jpg',
-                        width: 44,
-                        height: 44,
-                        fit: BoxFit.cover,
+        decoration: const BoxDecoration(gradient: VxrTokens.brandGradient),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // ── Hero (gradient) ─────────────────────────────────
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                  24, MediaQuery.of(context).padding.top + 24, 24, 24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  GestureDetector(
+                    onTap: () => Navigator.pop(context),
+                    child: Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(12),
                       ),
+                      child: const Icon(Icons.arrow_back_ios_new,
+                          color: Colors.white, size: 16),
                     ),
-                    const SizedBox(width: 10),
-                    const Text(
-                      "ViewxRent",
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 20,
+                  ),
+                  const SizedBox(height: 20),
+                  const VxrLogoMark(onGradient: true, size: 18),
+                  const SizedBox(height: 24),
+                  Text(
+                    "Create Account",
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 28,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    "Sign up to get started",
+                    style: GoogleFonts.dmSans(
+                      fontSize: 13,
+                      color: Colors.white.withOpacity(0.75),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // ── White card slides up ────────────────────────────
+            Expanded(
+              child: Container(
+                width: double.infinity,
+                decoration: const BoxDecoration(
+                  color: VxrTokens.surface,
+                  borderRadius: BorderRadius.only(
+                    topLeft: Radius.circular(VxrTokens.radiusSheet),
+                    topRight: Radius.circular(VxrTokens.radiusSheet),
+                  ),
+                ),
+                padding: const EdgeInsets.fromLTRB(24, 24, 24, 24),
+                child: SingleChildScrollView(
+                  child: Column(
+                    children: [
+                      VxrInputField(
+                        label: 'Full Name',
+                        hint: 'Enter your full name',
+                        prefixIcon: Icons.person_outline,
+                        controller: _fullNameController,
                       ),
-                    ),
-                  ],
-                ),
-
-                const SizedBox(height: 32),
-
-                const Text(
-                  "Create Account",
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 28,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                const Text(
-                  "Sign up to get started",
-                  style: TextStyle(color: Colors.white70, fontSize: 15),
-                ),
-
-                const SizedBox(height: 30),
-
-                /// FULL NAME
-                TextField(
-                  controller: _fullNameController,
-                  style: const TextStyle(color: Colors.white),
-                  cursorColor: Colors.white,
-                  textCapitalization: TextCapitalization.words,
-                  decoration: _inputDecoration(
-                      "Full Name", "Enter your full name", Icons.person_outline),
-                ),
-
-                const SizedBox(height: 16),
-
-                /// EMAIL
-                TextField(
-                  controller: _emailController,
-                  keyboardType: TextInputType.emailAddress,
-                  style: const TextStyle(color: Colors.white),
-                  cursorColor: Colors.white,
-                  decoration: _inputDecoration(
-                      "Email", "Enter your email", Icons.email_outlined),
-                ),
-
-                const SizedBox(height: 16),
-
-                /// PHONE NUMBER
-                TextField(
-                  controller: _phoneController,
-                  keyboardType: TextInputType.phone,
-                  style: const TextStyle(color: Colors.white),
-                  cursorColor: Colors.white,
-                  decoration: _inputDecoration(
-                      "Phone Number", "Enter your phone number", Icons.phone_outlined),
-                ),
-
-                const SizedBox(height: 16),
-
-                /// PASSWORD
-                TextField(
-                  controller: _passwordController,
-                  obscureText: _obscurePassword,
-                  style: const TextStyle(color: Colors.white),
-                  cursorColor: Colors.white,
-                  decoration: _passwordDecoration(
-                    "Password",
-                    "Enter your password",
-                    _obscurePassword,
-                    () => setState(
-                        () => _obscurePassword = !_obscurePassword),
-                  ),
-                ),
-
-                const SizedBox(height: 16),
-
-                /// CONFIRM PASSWORD
-                TextField(
-                  controller: _confirmPasswordController,
-                  obscureText: _obscureConfirmPassword,
-                  style: const TextStyle(color: Colors.white),
-                  cursorColor: Colors.white,
-                  decoration: _passwordDecoration(
-                    "Confirm Password",
-                    "Confirm your password",
-                    _obscureConfirmPassword,
-                    () => setState(() =>
-                        _obscureConfirmPassword = !_obscureConfirmPassword),
-                  ),
-                ),
-
-                const SizedBox(height: 12),
-
-                /// TERMS CHECKBOX
-                Row(
-                  children: [
-                    SizedBox(
-                      width: 24,
-                      height: 24,
-                      child: Checkbox(
-                        value: isChecked,
-                        onChanged: (value) {
-                          setState(() => isChecked = value!);
-                        },
-                        activeColor: Colors.white,
-                        checkColor: Colors.deepOrange,
-                        side: const BorderSide(color: Colors.white),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(4),
+                      const SizedBox(height: 14),
+                      VxrInputField(
+                        label: 'Email Address',
+                        hint: 'Enter your email',
+                        prefixIcon: Icons.mail_outline,
+                        controller: _emailController,
+                        keyboardType: TextInputType.emailAddress,
+                      ),
+                      const SizedBox(height: 14),
+                      VxrInputField(
+                        label: 'Phone Number',
+                        hint: 'Enter your phone number',
+                        prefixIcon: Icons.phone_outlined,
+                        controller: _phoneController,
+                        keyboardType: TextInputType.phone,
+                      ),
+                      const SizedBox(height: 14),
+                      VxrInputField(
+                        label: 'Password',
+                        hint: 'Enter your password',
+                        prefixIcon: Icons.lock_outline,
+                        obscureText: _obscurePassword,
+                        controller: _passwordController,
+                        suffix: IconButton(
+                          icon: Icon(
+                            _obscurePassword
+                                ? Icons.visibility_off_outlined
+                                : Icons.visibility_outlined,
+                            size: 18,
+                            color: t.textMuted,
+                          ),
+                          onPressed: () => setState(
+                              () => _obscurePassword = !_obscurePassword),
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 10),
-                    const Expanded(
-                      child: Text(
-                        "I agree to the Terms of Service and Privacy Policy",
-                        style: TextStyle(color: Colors.white70, fontSize: 13),
-                      ),
-                    ),
-                  ],
-                ),
-
-                const SizedBox(height: 20),
-
-                /// CREATE BUTTON
-                SizedBox(
-                  width: double.infinity,
-                  height: 52,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      foregroundColor: Colors.deepOrange,
-                      elevation: 4,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                    ),
-                    onPressed: _isLoading ? null : signUp,
-                    child: _isLoading
-                        ? const SizedBox(
-                            width: 22,
-                            height: 22,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2.5,
-                              color: Colors.deepOrange,
-                            ),
-                          )
-                        : const Text(
-                            "Create Account",
-                            style: TextStyle(
-                                fontWeight: FontWeight.bold, fontSize: 16),
+                      const SizedBox(height: 14),
+                      VxrInputField(
+                        label: 'Confirm Password',
+                        hint: 'Confirm your password',
+                        prefixIcon: Icons.lock_outline,
+                        obscureText: _obscureConfirmPassword,
+                        controller: _confirmPasswordController,
+                        suffix: IconButton(
+                          icon: Icon(
+                            _obscureConfirmPassword
+                                ? Icons.visibility_off_outlined
+                                : Icons.visibility_outlined,
+                            size: 18,
+                            color: t.textMuted,
                           ),
-                  ),
-                ),
-
-                const SizedBox(height: 24),
-
-                /// SIGN IN LINK
-                Center(
-                  child: GestureDetector(
-                    onTap: () {
-                      Navigator.pushReplacement(
-                        context,
-                        MaterialPageRoute(
-                            builder: (context) => const LoginScreen()),
-                      );
-                    },
-                    child: RichText(
-                      text: const TextSpan(
-                        text: "Already have an account? ",
-                        style: TextStyle(color: Colors.white70),
+                          onPressed: () => setState(() =>
+                              _obscureConfirmPassword =
+                                  !_obscureConfirmPassword),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
                         children: [
-                          TextSpan(
-                            text: "Sign In",
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                              decoration: TextDecoration.underline,
+                          SizedBox(
+                            width: 24,
+                            height: 24,
+                            child: Checkbox(
+                              value: isChecked,
+                              onChanged: (value) {
+                                setState(() => isChecked = value!);
+                              },
+                              activeColor: t.accent,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              "I agree to the Terms of Service and Privacy Policy",
+                              style: GoogleFonts.dmSans(
+                                  color: t.textSub, fontSize: 12),
                             ),
                           ),
                         ],
                       ),
-                    ),
+                      const SizedBox(height: 16),
+                      VxrPrimaryButton(
+                        label: 'Sign Up',
+                        onPressed: signUp,
+                        loading: _isLoading,
+                      ),
+                      const SizedBox(height: 24),
+                      GestureDetector(
+                        onTap: () {
+                          Navigator.pushReplacement(
+                            context,
+                            MaterialPageRoute(
+                                builder: (context) => const LoginScreen()),
+                          );
+                        },
+                        child: RichText(
+                          text: TextSpan(
+                            text: "Already have an account? ",
+                            style: GoogleFonts.dmSans(
+                                fontSize: 12, color: t.textSub),
+                            children: [
+                              TextSpan(
+                                text: "Sign In",
+                                style: GoogleFonts.dmSans(
+                                  fontSize: 12,
+                                  color: t.accent,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-
-                const SizedBox(height: 20),
-              ],
+              ),
             ),
-          ),
+          ],
         ),
       ),
     );

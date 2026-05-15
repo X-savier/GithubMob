@@ -1,23 +1,25 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'theme/vxr_theme.dart';
 import 'contract_view_screen.dart';
 import 'property_data.dart';
 
 // ─── Colors ───────────────────────────────────────────────────────────────────
+// Re-skinned to Variation B: routes through VxrTokens.
 
 class C {
-  static const coral = Color(0xFFE85D5D);
-  static const bg = Color(0xFFF4F4F6);
-  static const card = Colors.white;
-  static const textPrimary = Color(0xFF1A1A2E);
-  static const textLabel = Color(0xFF9898A8);
-  static const textValue = Color(0xFF2A2A3E);
-  static const border = Color(0xFFEEEEF2);
-  static const green = Color(0xFF1DB954);
-  static const red = Color(0xFFE03C3C);
-  static const gradStart = Color(0xFFFF7B7B);
-  static const gradEnd = Color(0xFFE85D5D);
+  static const coral = VxrTokens.accent;
+  static const bg = VxrTokens.bg;
+  static const card = VxrTokens.surface;
+  static const textPrimary = VxrTokens.text;
+  static const textLabel = VxrTokens.textMuted;
+  static const textValue = VxrTokens.text;
+  static const border = VxrTokens.border;
+  static const green = VxrTokens.success;
+  static const red = VxrTokens.danger;
+  static const gradStart = VxrTokens.gradStart;
+  static const gradEnd = VxrTokens.gradMid;
 }
 
 // ─── App ──────────────────────────────────────────────────────────────────────

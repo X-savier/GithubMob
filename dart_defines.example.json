@@ -1,0 +1,4 @@
+{
+  "PAYMONGO_PUBLIC_KEY": "pk_test_REPLACE_ME",
+  "MOCK_PAYMENTS_ENABLED": "false"
+}

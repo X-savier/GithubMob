@@ -1,0 +1,48 @@
+---
+config:
+  theme: neutral
+  flowchart:
+    curve: basis
+    nodeSpacing: 30
+    rankSpacing: 50
+---
+flowchart TB
+  classDef inputCls fill:#FFE9D6,stroke:#E07A30,color:#3B2410,stroke-width:1.2px
+  classDef processCls fill:#D9ECFF,stroke:#1E5BBA,color:#0F2A52,stroke-width:1.2px
+  classDef outputCls fill:#D9F2DE,stroke:#1E8B4A,color:#0E3B1E,stroke-width:1.2px
+  classDef header fill:#333,stroke:#000,color:#FFF,stroke-width:1.2px,font-weight:bold
+
+  IH[INPUT]:::header
+  PH[PROCESS]:::header
+  OH[OUTPUT]:::header
+
+  IH --> I1[User Credentials and Profile Data]
+  IH --> I2[Listing Details and Property Photos]
+  IH --> I3[Rental Application Information]
+  IH --> I4[Contract Templates and Lease Terms]
+  IH --> I5[Payment Method and Card Details]
+  IH --> I6[Maintenance Reports and Chat Messages]
+
+  PH --> P1[Authentication and Identity Verification]
+  PH --> P2[Listing Creation and Image Management]
+  PH --> P3[Application Submission and Review]
+  PH --> P4[Contract Generation and Dual Signing]
+  PH --> P5[Stripe Payment Processing]
+  PH --> P6[Real-time Messaging via Supabase Realtime]
+  PH --> P7[Report Handling and Resolution]
+
+  OH --> O1[Verified User Accounts]
+  OH --> O2[Published Property Listings on Map]
+  OH --> O3[Approved or Rejected Applications]
+  OH --> O4[Signed PDF Lease Contracts]
+  OH --> O5[Recorded Payments and Receipts]
+  OH --> O6[Active In-Stay Rental Records]
+  OH --> O7[Resolved Maintenance Reports]
+
+  IH ==> PH
+  PH ==> OH
+  OH -.->|Feedback Loop| IH
+
+  class I1,I2,I3,I4,I5,I6 inputCls
+  class P1,P2,P3,P4,P5,P6,P7 processCls
+  class O1,O2,O3,O4,O5,O6,O7 outputCls

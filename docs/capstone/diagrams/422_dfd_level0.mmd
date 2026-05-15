@@ -1,0 +1,39 @@
+---
+config:
+  theme: neutral
+  flowchart:
+    curve: basis
+    nodeSpacing: 45
+    rankSpacing: 70
+---
+flowchart TB
+  classDef ent fill:#FFE0B2,stroke:#C45A14,color:#2A1606,stroke-width:1.5px,font-weight:bold
+  classDef proc fill:#D9ECFF,stroke:#1E5BBA,color:#0F2A52,stroke-width:1.5px,font-weight:bold
+  classDef ext fill:#E8E8E8,stroke:#555,color:#1F1F1F,stroke-width:1px
+
+  T((Tenant))
+  L((Landlord))
+  A((Administrator))
+
+  P0(("0.0<br/>ViewXRent<br/>Rental Platform"))
+
+  STRIPE[Stripe API]
+  GMAPS[Google Maps API]
+  SUPA[Supabase Cloud<br/>PostgreSQL plus Realtime plus Storage]
+
+  class T,L,A ent
+  class P0 proc
+  class STRIPE,GMAPS,SUPA ext
+
+  T  -->|signup, search, apply, sign, pay, message, report| P0
+  P0 -->|listings, contracts, receipts, chat threads| T
+
+  L  -->|enlist, approve, sign, respond, manage| P0
+  P0 -->|applications, payments, reports, tenant lists| L
+
+  A  -->|admin actions, CMS edits, verifications| P0
+  P0 -->|dashboards, audit logs| A
+
+  P0 <-->|PaymentIntent, charge status| STRIPE
+  P0 <-->|geocoding, map tiles| GMAPS
+  P0 <-->|SQL CRUD, file uploads, Realtime channels| SUPA

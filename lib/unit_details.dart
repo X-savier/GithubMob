@@ -1,12 +1,16 @@
 import 'package:flutter/material.dart';
+import 'dart:ui' as ui;
+import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'theme/vxr_theme.dart';
+import 'theme/vxr_widgets.dart';
+import 'chat_thread_screen.dart';
 import 'contract_view_screen.dart';
 import 'panorama_tour_viewer.dart';
-import 'profile_screen.dart';
 import 'property_data.dart';
 import 'rental_application.dart';
-import 'search_field.dart';
+import 'verification_screen.dart';
 
 class UnitDetailsScreen extends StatefulWidget {
   final Property property;
@@ -22,10 +26,13 @@ class UnitDetailsScreen extends StatefulWidget {
 
 class _UnitDetailsScreenState extends State<UnitDetailsScreen> {
   Map<String, dynamic>? _details;
+  Map<String, dynamic>? _landlord;
   List<String> _images = [];
   List<String> _amenities = [];
   List<TourRoom> _panoramaRooms = [];
   bool _isLoading = true;
+  bool _openingChat = false;
+  bool _contractClosed = false;
   ({String id, String status})? _myApp;
 
   Property get p => widget.property;
@@ -40,70 +47,144 @@ class _UnitDetailsScreenState extends State<UnitDetailsScreen> {
   Future<void> _refreshApplicationStatus() async {
     if (p.id == null) return;
     final res = await getMyApplicationForListing(p.id!);
-    if (mounted) setState(() => _myApp = res);
+    bool contractClosed = false;
+    if (res != null && res.status == 'approved') {
+      // Check if the contract tied to this application has already been closed.
+      // A closed/archived contract means the tenancy ended — let the tenant apply again.
+      try {
+        final contract = await Supabase.instance.client
+            .from('contract')
+            .select('status')
+            .eq('application_id', res.id)
+            .maybeSingle();
+        final cs = contract?['status']?.toString() ?? '';
+        contractClosed = cs == 'closed' || cs == 'archived';
+      } catch (_) {}
+    }
+    if (mounted) setState(() { _myApp = res; _contractClosed = contractClosed; });
   }
 
-  Widget _buildApplyOrContractCta() {
-    final status = _myApp?.status;
-    String label;
-    Color bg;
-    VoidCallback? onPressed;
+  /// Sticky bottom CTA bar — Variation B treatment: surface bg, top border,
+  /// optional 360° tour button (flex 1) + the apply / contract CTA (flex 2).
+  Widget _buildStickyCta() {
+    final t = VxrTheme.of(context);
+    final isOwner =
+        p.landlordId == Supabase.instance.client.auth.currentUser?.id;
+    final hasTour = _panoramaRooms.isNotEmpty;
 
-    switch (status) {
-      case 'approved':
-        label = 'View Contract';
-        bg = const Color(0xFF4CAF50);
-        onPressed = () async {
-          await Navigator.push(
+    Widget? tourButton;
+    if (hasTour) {
+      tourButton = VxrSecondaryButton(
+        label: '360° Tour',
+        icon: Icons.view_in_ar,
+        onPressed: () {
+          Navigator.push(
             context,
             MaterialPageRoute(
-              builder: (_) => ContractViewScreen(
-                applicationId: _myApp!.id,
-                listingId: p.id!,
-                landlordId: p.landlordId ?? '',
+              builder: (_) => PanoramaTourViewer(
+                rooms: _panoramaRooms,
+                listingTitle: p.title,
               ),
             ),
           );
-          _refreshApplicationStatus();
-        };
-        break;
-      case 'pending':
-        label = 'Application Pending';
-        bg = Colors.grey.shade400;
-        onPressed = null;
-        break;
-      case 'rejected':
-        label = 'Apply Again';
-        bg = const Color(0xfff36c6c);
-        onPressed = () => _openApplicationForm();
-        break;
-      default:
-        label = 'Apply Now';
-        bg = const Color(0xfff36c6c);
-        onPressed = () => _openApplicationForm();
+        },
+      );
     }
 
-    return ElevatedButton(
-      onPressed: onPressed,
-      style: ElevatedButton.styleFrom(
-        backgroundColor: bg,
-        foregroundColor: Colors.white,
-        disabledBackgroundColor: Colors.grey.shade400,
-        disabledForegroundColor: Colors.white,
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(25)),
-        padding:
-            const EdgeInsets.symmetric(horizontal: 30, vertical: 15),
-      ),
-      child: Text(
-        label,
-        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+    final actionButton = isOwner ? null : _buildApplyOrContractCta();
+
+    final children = <Widget>[];
+    if (tourButton != null) {
+      children.add(Expanded(child: tourButton));
+    }
+    if (actionButton != null) {
+      if (children.isNotEmpty) children.add(const SizedBox(width: 10));
+      children.add(Expanded(flex: 2, child: actionButton));
+    }
+    if (children.isEmpty) return const SizedBox.shrink();
+
+    return SafeArea(
+      top: false,
+      child: Container(
+        decoration: BoxDecoration(
+          color: t.surface,
+          border: Border(top: BorderSide(color: t.border)),
+        ),
+        padding: const EdgeInsets.fromLTRB(18, 12, 18, 12),
+        child: Row(children: children),
       ),
     );
   }
 
+  Widget _buildApplyOrContractCta() {
+    final t = VxrTheme.of(context);
+    final status = _myApp?.status;
+
+    switch (status) {
+      case 'approved' when !_contractClosed:
+        return VxrPrimaryButton(
+          label: 'View Contract',
+          icon: Icons.description_outlined,
+          onPressed: () async {
+            await Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => ContractViewScreen(
+                  applicationId: _myApp!.id,
+                  listingId: p.id!,
+                  landlordId: p.landlordId ?? '',
+                ),
+              ),
+            );
+            _refreshApplicationStatus();
+          },
+        );
+      case 'pending':
+        return Container(
+          height: 50,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: t.surface2,
+            borderRadius: BorderRadius.circular(VxrTokens.radius),
+            border: Border.all(color: t.border),
+          ),
+          child: Text(
+            'Application Pending',
+            style: GoogleFonts.plusJakartaSans(
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+              color: t.textMuted,
+            ),
+          ),
+        );
+      case 'rejected':
+        return VxrPrimaryButton(
+          label: 'Apply Again',
+          onPressed: () => _openApplicationForm(),
+        );
+      default:
+        return VxrPrimaryButton(
+          label: 'Apply Now',
+          onPressed: () => _openApplicationForm(),
+        );
+    }
+  }
+
   Future<void> _openApplicationForm() async {
     if (p.id == null) return;
+    // Guard: listing must be active.
+    final listingStatus = _details?['status']?.toString() ?? 'active';
+    if (listingStatus != 'active') {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('This listing is no longer accepting applications.'),
+        ),
+      );
+      return;
+    }
+    final canApply = await ensureVerifiedToApply(context);
+    if (!canApply || !mounted) return;
     await Navigator.push(
       context,
       MaterialPageRoute(
@@ -131,12 +212,13 @@ class _UnitDetailsScreenState extends State<UnitDetailsScreen> {
         _details = results[0] as Map<String, dynamic>?;
         _images = results[1] as List<String>;
         _amenities = results[2] as List<String>;
+        _details ??= <String, dynamic>{};
         // Build panorama room list
         final panoRecords = results[3] as List<Map<String, dynamic>>;
         _panoramaRooms = panoRecords.map((rec) {
           return TourRoom(
             label: rec['room_label']?.toString() ?? 'Room',
-            imageUrl: buildStorageUrl(rec['image_url'] ?? ''),
+            imageUrl: buildStorageUrl(rec['url'] ?? ''),
           );
         }).toList();
         // If no extra images, use the cover photo
@@ -146,6 +228,99 @@ class _UnitDetailsScreenState extends State<UnitDetailsScreen> {
         _isLoading = false;
       });
     }
+
+    // Pull listing_type directly from the `listings` table so the
+    // For Rent / For Lease badge always reflects the source-of-truth value.
+    try {
+      final row = await Supabase.instance.client
+          .from('listings')
+          .select('listing_type')
+          .eq('id', p.id!)
+          .maybeSingle();
+      if (mounted && row != null && row['listing_type'] != null) {
+        setState(() {
+          _details ??= <String, dynamic>{};
+          _details!['listing_type'] = row['listing_type'];
+        });
+      }
+    } catch (e) {
+      debugPrint('unit_details listing_type ERROR: $e');
+    }
+
+    // Pull the landlord's profile (full_name + avatar_url) for the
+    // Hosted By card. Lives in `profiles`, keyed by listings.landlord_id.
+    final landlordId = p.landlordId;
+    if (landlordId != null && landlordId.isNotEmpty) {
+      try {
+        final profile = await Supabase.instance.client
+            .from('profiles')
+            .select('id, full_name, avatar_url')
+            .eq('id', landlordId)
+            .maybeSingle();
+        if (mounted && profile != null) {
+          setState(() => _landlord = Map<String, dynamic>.from(profile));
+        }
+      } catch (e) {
+        debugPrint('unit_details landlord profile ERROR: $e');
+      }
+    }
+  }
+
+  Future<void> _openChatWithLandlord() async {
+    if (_openingChat) return;
+    final me = Supabase.instance.client.auth.currentUser?.id;
+    final landlordId = p.landlordId;
+    final listingId = p.id;
+    if (me == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please log in to message.')),
+      );
+      return;
+    }
+    if (landlordId == null || landlordId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No landlord on this listing.')),
+      );
+      return;
+    }
+    if (me == landlordId) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("That's your own listing.")),
+      );
+      return;
+    }
+
+    setState(() => _openingChat = true);
+    final messenger = ScaffoldMessenger.of(context);
+    final convId = await getOrCreateConversation(
+      landlordId: landlordId,
+      tenantId: me,
+      listingId: listingId,
+    );
+    if (!mounted) return;
+    setState(() => _openingChat = false);
+
+    if (convId == null) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Could not open chat. Try again.')),
+      );
+      return;
+    }
+
+    final name =
+        (_landlord?['full_name']?.toString().trim() ?? '');
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ChatThreadScreen(
+          conversationId: convId,
+          otherName: name.isEmpty ? 'Property Host' : name,
+          otherAvatarUrl:
+              _landlord?['avatar_url']?.toString() ?? '',
+          listingTitle: p.title,
+        ),
+      ),
+    );
   }
 
   String _val(String key, [String fallback = '\u2014']) {
@@ -159,46 +334,14 @@ class _UnitDetailsScreenState extends State<UnitDetailsScreen> {
     return DefaultTabController(
       length: 3,
       child: Scaffold(
-        backgroundColor: const Color(0xfff5f5f5),
-        bottomNavigationBar: BottomNavigationBar(
-          selectedItemColor: const Color(0xfff36c6c),
-          unselectedItemColor: Colors.grey,
-          type: BottomNavigationBarType.fixed,
-          items: const [
-            BottomNavigationBarItem(icon: Icon(Icons.home), label: "Home"),
-            BottomNavigationBarItem(icon: Icon(Icons.search), label: "Search"),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.message_outlined),
-              label: "Message",
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.person_outline),
-              label: "Profile",
-            ),
-          ],
-          onTap: (index) {
-            if (index == 0) {
-              Navigator.of(context).pop();
-            } else if (index == 1) {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                    builder: (context) => const SearchFieldScreen()),
-              );
-            } else if (index == 3) {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                    builder: (context) => const ProfileScreen()),
-              );
-            }
-          },
-        ),
+        backgroundColor: VxrTokens.bg,
+        bottomNavigationBar: _isLoading ? null : _buildStickyCta(),
         body: SafeArea(
+          top: false,
           child: _isLoading
               ? const Center(
                   child: CircularProgressIndicator(
-                    color: Color(0xfff36c6c),
+                    color: VxrTokens.accent,
                   ),
                 )
               : NestedScrollView(
@@ -215,12 +358,21 @@ class _UnitDetailsScreenState extends State<UnitDetailsScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                p.title,
-                                style: const TextStyle(
-                                  fontSize: 24,
-                                  fontWeight: FontWeight.bold,
-                                ),
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      p.title,
+                                      style: const TextStyle(
+                                        fontSize: 24,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  _buildListingTypeBadge(),
+                                ],
                               ),
                               const SizedBox(height: 8),
                               Row(
@@ -241,32 +393,18 @@ class _UnitDetailsScreenState extends State<UnitDetailsScreen> {
                                 ],
                               ),
                               const SizedBox(height: 16),
-                              // Price & Apply
+                              // Price
                               Row(
+                                crossAxisAlignment: CrossAxisAlignment.end,
                                 children: [
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        const Text(
-                                          "Price",
-                                          style: TextStyle(
-                                              fontSize: 12, color: Colors.grey),
-                                        ),
-                                        Text(
-                                          p.price,
-                                          style: const TextStyle(
-                                            fontSize: 22,
-                                            fontWeight: FontWeight.bold,
-                                            color: Color(0xfff36c6c),
-                                          ),
-                                        ),
-                                      ],
+                                  Text(
+                                    p.price,
+                                    style: GoogleFonts.plusJakartaSans(
+                                      fontSize: 22,
+                                      fontWeight: FontWeight.w800,
+                                      color: VxrTokens.accent,
                                     ),
                                   ),
-                                  if (p.landlordId != Supabase.instance.client.auth.currentUser?.id)
-                                    _buildApplyOrContractCta(),
                                 ],
                               ),
                               const SizedBox(height: 20),
@@ -285,63 +423,37 @@ class _UnitDetailsScreenState extends State<UnitDetailsScreen> {
                                     ),
                                   ],
                                 ),
-                                child: Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceAround,
-                                  children: [
-                                    _buildSpecItem(
-                                        Icons.bed, "${p.beds} Bed"),
-                                    _buildSpecItem(
-                                        Icons.bathroom, "${p.baths} Bath"),
-                                    _buildSpecItem(
-                                        Icons.square_foot, p.area),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(height: 10),
-                              // 360° Tour button
-                              if (_panoramaRooms.isNotEmpty)
-                                Padding(
-                                  padding: const EdgeInsets.only(top: 6),
-                                  child: SizedBox(
-                                    width: double.infinity,
-                                    child: OutlinedButton.icon(
-                                      onPressed: () {
-                                        Navigator.push(
-                                          context,
-                                          MaterialPageRoute(
-                                            builder: (_) => PanoramaTourViewer(
-                                              rooms: _panoramaRooms,
-                                              listingTitle: p.title,
-                                            ),
-                                          ),
-                                        );
-                                      },
-                                      icon: const Icon(Icons.view_in_ar,
-                                          size: 20),
-                                      label: Text(
-                                        'View 360° Tour (${_panoramaRooms.length} room${_panoramaRooms.length == 1 ? '' : 's'})',
-                                        style: const TextStyle(
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.w600,
-                                        ),
+                                child: IntrinsicHeight(
+                                  child: Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Expanded(
+                                        child: _buildSpecItem(
+                                            Icons.bed,
+                                            '${p.beds}',
+                                            p.beds == 1
+                                                ? 'Bedroom'
+                                                : 'Bedrooms'),
                                       ),
-                                      style: OutlinedButton.styleFrom(
-                                        foregroundColor:
-                                            const Color(0xfff36c6c),
-                                        side: const BorderSide(
-                                            color: Color(0xfff36c6c),
-                                            width: 1.5),
-                                        shape: RoundedRectangleBorder(
-                                          borderRadius:
-                                              BorderRadius.circular(15),
-                                        ),
-                                        padding: const EdgeInsets.symmetric(
-                                            vertical: 14),
+                                      Expanded(
+                                        child: _buildSpecItem(
+                                            Icons.bathtub_outlined,
+                                            p.baths,
+                                            p.baths == '1'
+                                                ? 'Bathroom'
+                                                : 'Bathrooms'),
                                       ),
-                                    ),
+                                      Expanded(
+                                        child: _buildSpecItem(
+                                            Icons.square_foot,
+                                            p.area,
+                                            'Floor Area'),
+                                      ),
+                                    ],
                                   ),
                                 ),
+                              ),
                             ],
                           ),
                         ),
@@ -349,12 +461,16 @@ class _UnitDetailsScreenState extends State<UnitDetailsScreen> {
                       // Tab bar
                       SliverPersistentHeader(
                         delegate: _SliverAppBarDelegate(
-                          const TabBar(
-                            labelColor: Color(0xfff36c6c),
-                            unselectedLabelColor: Colors.grey,
-                            indicatorColor: Color(0xfff36c6c),
-                            indicatorWeight: 3,
-                            tabs: [
+                          TabBar(
+                            labelColor: VxrTokens.accent,
+                            unselectedLabelColor: VxrTokens.textMuted,
+                            indicatorColor: VxrTokens.accent,
+                            indicatorWeight: 2,
+                            labelStyle: GoogleFonts.plusJakartaSans(
+                                fontSize: 12, fontWeight: FontWeight.w700),
+                            unselectedLabelStyle: GoogleFonts.plusJakartaSans(
+                                fontSize: 12, fontWeight: FontWeight.w600),
+                            tabs: const [
                               Tab(text: "Details"),
                               Tab(text: "Amenities"),
                               Tab(text: "Location"),
@@ -436,31 +552,28 @@ class _UnitDetailsScreenState extends State<UnitDetailsScreen> {
         ),
         // Back button
         Positioned(
-          top: 20,
-          left: 20,
+          top: MediaQuery.of(context).padding.top + 8,
+          left: 16,
           child: _circleButton(
-            icon: Icons.arrow_back,
-            color: Colors.black87,
+            icon: Icons.arrow_back_ios_new,
             onPressed: () => Navigator.pop(context),
           ),
         ),
         // Share button
         Positioned(
-          top: 20,
-          right: 80,
+          top: MediaQuery.of(context).padding.top + 8,
+          right: 60,
           child: _circleButton(
             icon: Icons.share_outlined,
-            color: Colors.black87,
             onPressed: () {},
           ),
         ),
         // Favorite button
         Positioned(
-          top: 20,
-          right: 20,
+          top: MediaQuery.of(context).padding.top + 8,
+          right: 16,
           child: _circleButton(
             icon: Icons.favorite_border,
-            color: const Color(0xfff36c6c),
             onPressed: () {},
           ),
         ),
@@ -646,31 +759,6 @@ class _UnitDetailsScreenState extends State<UnitDetailsScreen> {
 
           const SizedBox(height: 24),
 
-          // Requirements
-          if (_boolVal('requires_valid_id') ||
-              _boolVal('requires_proof_of_income') ||
-              _boolVal('requires_employment_cert') ||
-              _boolVal('requires_references')) ...[
-            const Text("Requirements",
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                if (_boolVal('requires_valid_id'))
-                  _requirementChip('Valid ID'),
-                if (_boolVal('requires_proof_of_income'))
-                  _requirementChip('Proof of Income'),
-                if (_boolVal('requires_employment_cert'))
-                  _requirementChip('Employment Certificate'),
-                if (_boolVal('requires_references'))
-                  _requirementChip('References'),
-              ],
-            ),
-            const SizedBox(height: 24),
-          ],
-
           // Hosted By
           const Text("Hosted By",
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
@@ -680,31 +768,14 @@ class _UnitDetailsScreenState extends State<UnitDetailsScreen> {
             decoration: _cardDecoration(),
             child: Row(
               children: [
-                Container(
-                  width: 50,
-                  height: 50,
-                  decoration: BoxDecoration(
-                    color: const Color(0xfff36c6c).withOpacity(0.1),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Center(
-                    child: Text(
-                      _initials(_val('host_name', 'Host')),
-                      style: const TextStyle(
-                        color: Color(0xfff36c6c),
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                      ),
-                    ),
-                  ),
-                ),
+                _hostedByAvatar(),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        _val('host_name', 'Property Host'),
+                        _hostName(),
                         style: const TextStyle(
                             fontSize: 16, fontWeight: FontWeight.bold),
                       ),
@@ -725,20 +796,33 @@ class _UnitDetailsScreenState extends State<UnitDetailsScreen> {
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: Colors.grey[100],
-                        shape: BoxShape.circle,
+                    Material(
+                      color: Colors.grey[100],
+                      shape: const CircleBorder(),
+                      child: InkWell(
+                        customBorder: const CircleBorder(),
+                        onTap: _openingChat ? null : _openChatWithLandlord,
+                        child: Padding(
+                          padding: const EdgeInsets.all(8),
+                          child: _openingChat
+                              ? const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: VxrTokens.accent,
+                                  ),
+                                )
+                              : const Icon(Icons.message_outlined,
+                                  size: 20, color: VxrTokens.accent),
+                        ),
                       ),
-                      child: const Icon(Icons.message_outlined,
-                          size: 20, color: Color(0xfff36c6c)),
                     ),
                     const SizedBox(width: 8),
                     Container(
                       padding: const EdgeInsets.all(8),
                       decoration: const BoxDecoration(
-                        color: Color(0xfff36c6c),
+                        color: VxrTokens.accent,
                         shape: BoxShape.circle,
                       ),
                       child: const Icon(Icons.call,
@@ -910,11 +994,11 @@ class _UnitDetailsScreenState extends State<UnitDetailsScreen> {
                 Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: const Color(0xfff36c6c).withOpacity(0.1),
+                    color: VxrTokens.accent.withOpacity(0.1),
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: const Icon(Icons.location_on,
-                      color: Color(0xfff36c6c)),
+                      color: VxrTokens.accent),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -967,43 +1051,96 @@ class _UnitDetailsScreenState extends State<UnitDetailsScreen> {
 
   Widget _circleButton({
     required IconData icon,
-    required Color color,
+    Color color = Colors.white,
     required VoidCallback onPressed,
   }) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        shape: BoxShape.circle,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.1),
-            blurRadius: 5,
-            spreadRadius: 1,
+    return ClipOval(
+      child: BackdropFilter(
+        filter: ui.ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+        child: GestureDetector(
+          onTap: onPressed,
+          child: Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.2),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, color: color, size: 18),
           ),
-        ],
-      ),
-      child: IconButton(
-        icon: Icon(icon, color: color),
-        onPressed: onPressed,
+        ),
       ),
     );
   }
 
-  Widget _buildSpecItem(IconData icon, String label) {
+  Widget _buildListingTypeBadge() {
+    final type = (_details?['listing_type']?.toString() ?? 'rent')
+        .toLowerCase()
+        .trim();
+    final isLease = type == 'lease';
+    final label = isLease ? 'For Lease' : 'For Rent';
+    final bg = isLease
+        ? const Color(0xff3b82f6).withOpacity(0.12)
+        : VxrTokens.accent.withOpacity(0.12);
+    final fg =
+        isLease ? const Color(0xff1d4ed8) : VxrTokens.accent;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: fg.withOpacity(0.4), width: 1),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
+          color: fg,
+          letterSpacing: 0.3,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSpecItem(IconData icon, String value, String label) {
     return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         Container(
           padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
-            color: const Color(0xfff36c6c).withOpacity(0.1),
+            color: VxrTokens.accent.withOpacity(0.1),
             borderRadius: BorderRadius.circular(10),
           ),
-          child: Icon(icon, color: const Color(0xfff36c6c), size: 24),
+          child: Icon(icon, color: VxrTokens.accent, size: 24),
         ),
         const SizedBox(height: 8),
-        Text(label,
-            style:
-                const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
+        Text(
+          value,
+          textAlign: TextAlign.center,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
+            color: Colors.black87,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          label,
+          textAlign: TextAlign.center,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w500,
+            color: Colors.grey[600],
+          ),
+        ),
       ],
     );
   }
@@ -1103,15 +1240,6 @@ class _UnitDetailsScreenState extends State<UnitDetailsScreen> {
     );
   }
 
-  Widget _requirementChip(String label) {
-    return Chip(
-      avatar: const Icon(Icons.description, size: 16, color: Color(0xfff36c6c)),
-      label: Text(label, style: const TextStyle(fontSize: 13)),
-      backgroundColor: const Color(0xfff36c6c).withOpacity(0.08),
-      side: BorderSide.none,
-    );
-  }
-
   Widget _buildAmenityItem(IconData icon, String amenity) {
     return Container(
       padding: const EdgeInsets.all(16),
@@ -1121,10 +1249,10 @@ class _UnitDetailsScreenState extends State<UnitDetailsScreen> {
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: const Color(0xfff36c6c).withOpacity(0.1),
+              color: VxrTokens.accent.withOpacity(0.1),
               borderRadius: BorderRadius.circular(10),
             ),
-            child: Icon(icon, color: const Color(0xfff36c6c)),
+            child: Icon(icon, color: VxrTokens.accent),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -1132,7 +1260,7 @@ class _UnitDetailsScreenState extends State<UnitDetailsScreen> {
                 style: const TextStyle(
                     fontSize: 16, fontWeight: FontWeight.w500)),
           ),
-          const Icon(Icons.check_circle, color: Color(0xfff36c6c)),
+          const Icon(Icons.check_circle, color: VxrTokens.accent),
         ],
       ),
     );
@@ -1188,6 +1316,44 @@ class _UnitDetailsScreenState extends State<UnitDetailsScreen> {
     return name.isNotEmpty ? name[0].toUpperCase() : '?';
   }
 
+  String _hostName() {
+    final fromProfile =
+        _landlord?['full_name']?.toString().trim() ?? '';
+    if (fromProfile.isNotEmpty) return fromProfile;
+    return _val('host_name', 'Property Host');
+  }
+
+  Widget _hostedByAvatar() {
+    final url = (_landlord?['avatar_url'] ?? '').toString();
+    final fallback = Container(
+      width: 50,
+      height: 50,
+      decoration: BoxDecoration(
+        color: VxrTokens.accent.withOpacity(0.1),
+        shape: BoxShape.circle,
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        _initials(_hostName()),
+        style: const TextStyle(
+          color: VxrTokens.accent,
+          fontWeight: FontWeight.bold,
+          fontSize: 16,
+        ),
+      ),
+    );
+    if (url.isEmpty) return fallback;
+    return ClipOval(
+      child: Image.network(
+        url,
+        width: 50,
+        height: 50,
+        fit: BoxFit.cover,
+        errorBuilder: (_, _, _) => fallback,
+      ),
+    );
+  }
+
   IconData _amenityIcon(String name) {
     final lower = name.toLowerCase();
     if (lower.contains('air') || lower.contains('aircon')) return Icons.ac_unit;
@@ -1227,7 +1393,7 @@ class _SliverAppBarDelegate extends SliverPersistentHeaderDelegate {
   @override
   Widget build(
       BuildContext context, double shrinkOffset, bool overlapsContent) {
-    return Container(color: const Color(0xfff5f5f5), child: tabBar);
+    return Container(color: VxrTokens.bg, child: tabBar);
   }
 
   @override

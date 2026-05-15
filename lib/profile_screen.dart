@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
+import 'theme/vxr_theme.dart';
+import 'theme/vxr_widgets.dart';
 import 'auth/auth_service.dart';
 import 'manage_listing.dart';
 import 'tenantmanagement_screen.dart';
@@ -13,6 +16,11 @@ import 'my_applications_screen.dart';
 import 'profile_information_screen.dart';
 import 'house_enlistment_screen.dart';
 import 'property_data.dart';
+import 'verification_screen.dart';
+import 'search_field.dart';
+import 'conversations_screen.dart';
+import 'favorites_screen.dart';
+import 'services/profile_service.dart' as profile_api;
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -30,6 +38,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String _phone = '';
   String? _avatarUrl;
   bool _hasListings = false;
+  bool _hasRental = false;
+  String? _role;
+  bool _isVerified = false;
+  // 'approved' | 'manual_review' | 'rejected' | null (never submitted).
+  String? _verificationDecision;
+
+  bool get _isAdmin => _role == 'admin';
 
   @override
   void initState() {
@@ -43,15 +58,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
       final results = await Future.wait([
         _authService.fetchProfile(),
         hasUserListings(),
+        getLatestVerification(),
+        profile_api.hasActiveContract(),
+        profile_api.getProfileRole(),
       ]);
       final profile = results[0] as Map<String, dynamic>?;
       _hasListings = results[1] as bool;
+      final latestVerif = results[2] as Map<String, dynamic>?;
+      _hasRental = results[3] as bool;
+      _role = results[4] as String?;
       final user = _authService.currentUser;
       if (profile != null) {
         _fullName = profile['full_name'] ?? '';
         _email = profile['email'] ?? user?.email ?? '';
         _phone = profile['phone'] ?? '';
         _avatarUrl = profile['avatar_url'];
+        _isVerified = profile['is_verified'] == true;
+        // Source of truth for the badge is the latest `verifications` row
+        // — the cached `profiles.verification_decision` can drift if the
+        // row was deleted manually or if an admin only flipped `is_verified`
+        // without clearing the cached decision.
+        _verificationDecision = latestVerif?['decision']?.toString();
       } else if (user != null) {
         final meta = user.userMetadata ?? {};
         _fullName = meta['full_name'] ?? '';
@@ -91,12 +118,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
             const SizedBox(height: 8),
             if (_avatarUrl != null && _avatarUrl!.isNotEmpty)
               ListTile(
-                leading: const Icon(Icons.visibility, color: Color(0xfff36c6c)),
+                leading: const Icon(Icons.visibility, color: VxrTokens.accent),
                 title: const Text('View Profile Photo'),
                 onTap: () => Navigator.pop(ctx, 'view'),
               ),
             ListTile(
-              leading: const Icon(Icons.edit, color: Color(0xfff36c6c)),
+              leading: const Icon(Icons.edit, color: VxrTokens.accent),
               title: const Text('Change Profile Photo'),
               onTap: () => Navigator.pop(ctx, 'change'),
             ),
@@ -134,8 +161,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     color: Colors.grey[300],
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: const Icon(Icons.broken_image,
-                      size: 60, color: Colors.grey),
+                  child: const Icon(
+                    Icons.broken_image,
+                    size: 60,
+                    color: Colors.grey,
+                  ),
                 ),
               ),
             ),
@@ -165,12 +195,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
             ),
             ListTile(
-              leading: const Icon(Icons.camera_alt, color: Color(0xfff36c6c)),
+              leading: const Icon(Icons.camera_alt, color: VxrTokens.accent),
               title: const Text('Take Photo'),
               onTap: () => Navigator.pop(ctx, ImageSource.camera),
             ),
             ListTile(
-              leading: const Icon(Icons.photo_library, color: Color(0xfff36c6c)),
+              leading: const Icon(Icons.photo_library, color: VxrTokens.accent),
               title: const Text('Choose from Gallery'),
               onTap: () => Navigator.pop(ctx, ImageSource.gallery),
             ),
@@ -192,7 +222,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Profile photo updated'),
-            backgroundColor: Color(0xfff36c6c),
+            backgroundColor: VxrTokens.accent,
           ),
         );
       }
@@ -214,9 +244,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _openProfileInformation() async {
     final changed = await Navigator.push<bool>(
       context,
-      MaterialPageRoute(
-        builder: (_) => const ProfileInformationScreen(),
-      ),
+      MaterialPageRoute(builder: (_) => const ProfileInformationScreen()),
     );
     if (changed == true) {
       _loadProfile(); // Reload data if user saved changes
@@ -235,7 +263,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) => AlertDialog(
           title: const Text('Change Password'),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(15),
+          ),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -246,8 +276,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   labelText: 'New Password',
                   prefixIcon: const Icon(Icons.lock_outline),
                   suffixIcon: IconButton(
-                    icon: Icon(obscureNew ? Icons.visibility_off : Icons.visibility),
-                    onPressed: () => setDialogState(() => obscureNew = !obscureNew),
+                    icon: Icon(
+                      obscureNew ? Icons.visibility_off : Icons.visibility,
+                    ),
+                    onPressed: () =>
+                        setDialogState(() => obscureNew = !obscureNew),
                   ),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(10),
@@ -262,8 +295,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   labelText: 'Confirm Password',
                   prefixIcon: const Icon(Icons.lock_outline),
                   suffixIcon: IconButton(
-                    icon: Icon(obscureConfirm ? Icons.visibility_off : Icons.visibility),
-                    onPressed: () => setDialogState(() => obscureConfirm = !obscureConfirm),
+                    icon: Icon(
+                      obscureConfirm ? Icons.visibility_off : Icons.visibility,
+                    ),
+                    onPressed: () =>
+                        setDialogState(() => obscureConfirm = !obscureConfirm),
                   ),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(10),
@@ -280,7 +316,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ElevatedButton(
               onPressed: () => Navigator.pop(ctx, true),
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xfff36c6c),
+                backgroundColor: VxrTokens.accent,
                 foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10),
@@ -328,7 +364,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Password updated successfully'),
-            backgroundColor: Color(0xfff36c6c),
+            backgroundColor: VxrTokens.accent,
           ),
         );
       }
@@ -371,7 +407,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               }
             },
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xfff36c6c),
+              backgroundColor: VxrTokens.accent,
               foregroundColor: Colors.white,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(10),
@@ -387,58 +423,30 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xfff5f5f5),
-      appBar: AppBar(
-        backgroundColor: const Color(0xfff36c6c),
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: const Text(
-          'Profile',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-        ),
-        centerTitle: true,
-      ),
+      backgroundColor: VxrTokens.bg,
       body: _loading
           ? const Center(
-              child: CircularProgressIndicator(color: Color(0xfff36c6c)),
+              child: CircularProgressIndicator(color: VxrTokens.accent),
             )
           : RefreshIndicator(
-              color: const Color(0xfff36c6c),
+              color: VxrTokens.accent,
               onRefresh: _loadProfile,
               child: SingleChildScrollView(
                 physics: const AlwaysScrollableScrollPhysics(),
                 child: Column(
                   children: [
                     _buildProfileHeader(),
+                    const SizedBox(height: 16),
                     _buildMenuSection(),
-                    const SizedBox(height: 15),
+                    const SizedBox(height: 14),
                     _buildHelpSection(),
-                    const SizedBox(height: 15),
+                    const SizedBox(height: 16),
                     Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 15),
-                      child: SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton(
-                          onPressed: _handleLogout,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xfff36c6c),
-                            foregroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(25),
-                            ),
-                            padding: const EdgeInsets.symmetric(vertical: 15),
-                          ),
-                          child: const Text(
-                            'Logout',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: VxrPrimaryButton(
+                        label: 'Logout',
+                        icon: Icons.logout,
+                        onPressed: _handleLogout,
                       ),
                     ),
                     const SizedBox(height: 30),
@@ -446,101 +454,205 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               ),
             ),
+      bottomNavigationBar: VxrBottomNav(
+        activeIndex: 3,
+        onTap: (index) {
+          if (index == 3) return;
+          if (index == 0) {
+            Navigator.popUntil(context, (r) => r.isFirst);
+          } else if (index == 1) {
+            Navigator.popUntil(context, (r) => r.isFirst);
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const SearchFieldScreen()),
+            );
+          } else if (index == 2) {
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (_) => const ConversationsScreen()),
+            );
+          }
+        },
+      ),
     );
   }
 
   Widget _buildProfileHeader() {
+    final hasAvatar = _avatarUrl != null && _avatarUrl!.isNotEmpty;
     return Container(
-      padding: const EdgeInsets.all(20),
+      width: double.infinity,
+      decoration: const BoxDecoration(
+        gradient: VxrTokens.brandGradient,
+        borderRadius: BorderRadius.vertical(bottom: Radius.circular(24)),
+      ),
+      padding: EdgeInsets.fromLTRB(
+        18,
+        MediaQuery.of(context).padding.top + 12,
+        18,
+        24,
+      ),
       child: Column(
         children: [
-          GestureDetector(
-            onTap: _pickAvatar,
-            child: Stack(
-              children: [
-                Container(
-                  width: 100,
-                  height: 100,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: const Color(0xfff36c6c),
-                      width: 3,
-                    ),
-                  ),
-                  child: ClipOval(
-                    child: _avatarUrl != null && _avatarUrl!.isNotEmpty
-                        ? Image.network(
-                            _avatarUrl!,
-                            fit: BoxFit.cover,
-                            width: 100,
-                            height: 100,
-                            loadingBuilder: (ctx, child, progress) {
-                              if (progress == null) return child;
-                              return Container(
-                                color: Colors.grey[300],
-                                child: const Center(
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: Color(0xfff36c6c),
-                                  ),
-                                ),
-                              );
-                            },
-                            errorBuilder: (_, _, _) => Container(
-                              color: Colors.grey[300],
-                              child: const Icon(Icons.person,
-                                  size: 50, color: Colors.grey),
-                            ),
-                          )
-                        : Container(
-                            color: Colors.grey[300],
-                            child: const Icon(Icons.person,
-                                size: 50, color: Colors.grey),
-                          ),
-                  ),
+          Row(
+            children: [
+              GestureDetector(
+                onTap: () => Navigator.pop(context),
+                child: const Icon(
+                  Icons.arrow_back_ios_new,
+                  color: Colors.white,
+                  size: 16,
                 ),
-                Positioned(
-                  bottom: 0,
-                  right: 0,
-                  child: Container(
-                    padding: const EdgeInsets.all(4),
-                    decoration: const BoxDecoration(
-                      color: Color(0xfff36c6c),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(Icons.camera_alt,
-                        size: 16, color: Colors.white),
-                  ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'Profile',
+                style: GoogleFonts.plusJakartaSans(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.white,
                 ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            _fullName.isNotEmpty ? _fullName : 'No Name',
-            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+              ),
+            ],
           ),
           const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton(
-              onPressed: _openProfileInformation,
-              style: OutlinedButton.styleFrom(
-                foregroundColor: const Color(0xfff36c6c),
-                side: const BorderSide(color: Color(0xfff36c6c)),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(25),
+          GestureDetector(
+            onTap: _pickAvatar,
+            child: Container(
+              width: 72,
+              height: 72,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.white.withOpacity(0.25),
+                border: Border.all(
+                  color: Colors.white.withOpacity(0.8),
+                  width: 3,
                 ),
-                padding: const EdgeInsets.symmetric(vertical: 12),
               ),
-              child: const Text(
+              child: ClipOval(
+                child: hasAvatar
+                    ? Image.network(
+                        _avatarUrl!,
+                        fit: BoxFit.cover,
+                        width: 72,
+                        height: 72,
+                        errorBuilder: (_, _, _) => const Icon(
+                          Icons.person,
+                          size: 32,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Icon(Icons.person, size: 32, color: Colors.white),
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            _fullName.isNotEmpty ? _fullName : 'No Name',
+            style: GoogleFonts.plusJakartaSans(
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+              color: Colors.white,
+            ),
+          ),
+          if (_email.isNotEmpty) ...[
+            const SizedBox(height: 2),
+            Text(
+              _email,
+              style: GoogleFonts.dmSans(
+                fontSize: 11,
+                color: Colors.white.withOpacity(0.75),
+              ),
+            ),
+          ],
+          const SizedBox(height: 14),
+          GestureDetector(
+            onTap: _openProfileInformation,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(VxrTokens.radiusPill),
+                border: Border.all(
+                  color: Colors.white.withOpacity(0.6),
+                  width: 1.5,
+                ),
+              ),
+              child: Text(
                 'Edit Profile',
-                style: TextStyle(fontWeight: FontWeight.bold),
+                style: GoogleFonts.dmSans(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.white,
+                ),
               ),
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  // ── Verify Identity menu item with status badge ──
+  bool get _isVerificationPending =>
+      _verificationDecision == 'manual_review' ||
+      _verificationDecision == 'pending';
+
+  Future<void> _openVerification() async {
+    if (_isVerified) return;
+    await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => _isVerificationPending
+            ? const VerificationPendingScreen()
+            : const VerificationScreen(),
+      ),
+    );
+    if (mounted) _loadProfile();
+  }
+
+  Widget _buildVerificationMenuItem() {
+    // Tiered subtitle + colored chip on the right.
+    final String subtitle;
+    final String chipLabel;
+    final Color chipColor;
+    if (_isVerified) {
+      subtitle = 'Identity verified';
+      chipLabel = 'Verified';
+      chipColor = VxrTokens.success;
+    } else if (_isVerificationPending) {
+      subtitle = 'Awaiting admin review';
+      chipLabel = 'Pending';
+      chipColor = VxrTokens.warning;
+    } else if (_verificationDecision == 'rejected') {
+      subtitle = 'Last submission rejected — try again';
+      chipLabel = 'Failed';
+      chipColor = VxrTokens.danger;
+    } else {
+      subtitle = 'Verify your ID to list or apply';
+      chipLabel = 'Required';
+      chipColor = VxrTokens.warning;
+    }
+    final disabled = _isVerified;
+    return _MenuRow(
+      icon: Icons.verified_user_outlined,
+      title: 'Verify Identity',
+      subtitle: subtitle,
+      enabled: !disabled,
+      onTap: _openVerification,
+      trailing: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: chipColor.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(VxrTokens.radiusPill),
+        ),
+        child: Text(
+          chipLabel,
+          style: GoogleFonts.dmSans(
+            color: chipColor,
+            fontSize: 10,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
       ),
     );
   }
@@ -558,18 +670,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Widget _buildMenuSection() {
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 15),
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(15),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.grey.withValues(alpha: 0.1),
-            spreadRadius: 1,
-            blurRadius: 5,
-            offset: const Offset(0, 2),
-          ),
-        ],
+        color: VxrTokens.surface,
+        borderRadius: BorderRadius.circular(VxrTokens.radius),
+        border: Border.all(color: VxrTokens.border),
+        boxShadow: VxrTokens.shadowSm,
       ),
       child: Column(
         children: [
@@ -579,6 +686,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
             subtitle: 'Update your personal details',
             onTap: _openProfileInformation,
           ),
+          _buildDivider(),
+          _buildVerificationMenuItem(),
           if (!_hasListings) ...[
             _buildDivider(),
             _buildMenuItem(
@@ -594,13 +703,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
               icon: Icons.list_alt_outlined,
               title: 'Manage Listings',
               subtitle: 'Manage your rental units',
-              onTap: () {
-                Navigator.push(
+              onTap: () async {
+                debugPrint('ProfileScreen Manage Listings tapped');
+                await Navigator.push(
                   context,
                   MaterialPageRoute(
                     builder: (_) => const ManageListingScreen(),
                   ),
                 );
+                debugPrint('ProfileScreen Manage Listings returned');
               },
             ),
             _buildDivider(),
@@ -611,9 +722,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               onTap: () {
                 Navigator.push(
                   context,
-                  MaterialPageRoute(
-                    builder: (_) => const ApplicantsScreen(),
-                  ),
+                  MaterialPageRoute(builder: (_) => const ApplicantsScreen()),
                 );
               },
             ),
@@ -645,35 +754,49 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 );
               },
             ),
+            _buildDivider(),
+            _buildMenuItem(
+              icon: Icons.report_outlined,
+              title: 'Report Management',
+              subtitle: 'View tenant reports',
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const ReportManagementScreen(),
+                  ),
+                );
+              },
+            ),
           ],
           _buildDivider(),
           _buildMenuItem(
-            icon: Icons.report_outlined,
-            title: 'Report Management',
-            subtitle: 'View tenants reports',
+            icon: Icons.favorite_border,
+            title: 'Wishlists',
+            subtitle: 'Saved listings',
             onTap: () {
               Navigator.push(
                 context,
-                MaterialPageRoute(
-                  builder: (_) => const ReportManagementScreen(),
-                ),
+                MaterialPageRoute(builder: (_) => const FavoritesScreen()),
               );
             },
           ),
-          _buildDivider(),
-          _buildMenuItem(
-            icon: Icons.home_outlined,
-            title: 'My Rental',
-            subtitle: 'Active stay & next payment',
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => const InStayDashboardScreen(),
-                ),
-              );
-            },
-          ),
+          if (_hasRental || _hasListings) ...[
+            _buildDivider(),
+            _buildMenuItem(
+              icon: Icons.home_outlined,
+              title: 'My Rental',
+              subtitle: 'Active stay & next payment',
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const InStayDashboardScreen(),
+                  ),
+                );
+              },
+            ),
+          ],
           _buildDivider(),
           _buildMenuItem(
             icon: Icons.assignment_outlined,
@@ -682,26 +805,39 @@ class _ProfileScreenState extends State<ProfileScreen> {
             onTap: () {
               Navigator.push(
                 context,
-                MaterialPageRoute(
-                  builder: (_) => const MyApplicationsScreen(),
-                ),
+                MaterialPageRoute(builder: (_) => const MyApplicationsScreen()),
               );
             },
           ),
-          _buildDivider(),
-          _buildMenuItem(
-            icon: Icons.payment_outlined,
-            title: 'Payment Method',
-            subtitle: 'Manage payment option',
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => const PaymentScreen(),
-                ),
-              );
-            },
-          ),
+          if (_hasRental || _hasListings) ...[
+            _buildDivider(),
+            _buildMenuItem(
+              icon: Icons.payment_outlined,
+              title: 'Payment Method',
+              subtitle: 'Manage payment option',
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const PaymentScreen()),
+                );
+              },
+            ),
+          ],
+          if (_isAdmin) ...[
+            _buildDivider(),
+            _buildMenuItem(
+              icon: Icons.admin_panel_settings_outlined,
+              title: 'Admin Dashboard',
+              subtitle: 'Manage VXR platform',
+              onTap: () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Admin dashboard is web-only for now.'),
+                  ),
+                );
+              },
+            ),
+          ],
           _buildDivider(),
           _buildMenuItem(
             icon: Icons.security_outlined,
@@ -716,18 +852,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Widget _buildHelpSection() {
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 15),
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(15),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.grey.withOpacity(0.1),
-            spreadRadius: 1,
-            blurRadius: 5,
-            offset: const Offset(0, 2),
-          ),
-        ],
+        color: VxrTokens.surface,
+        borderRadius: BorderRadius.circular(VxrTokens.radius),
+        border: Border.all(color: VxrTokens.border),
+        boxShadow: VxrTokens.shadowSm,
       ),
       child: Column(
         children: [
@@ -794,8 +925,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Close',
-                style: TextStyle(color: Color(0xfff36c6c))),
+            child: const Text(
+              'Close',
+              style: TextStyle(color: VxrTokens.accent),
+            ),
           ),
         ],
       ),
@@ -808,30 +941,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     required String subtitle,
     required VoidCallback onTap,
   }) {
-    return ListTile(
-      onTap: onTap,
-      leading: Container(
-        padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          color: const Color(0xfff36c6c).withOpacity(0.1),
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Icon(icon, color: const Color(0xfff36c6c), size: 22),
-      ),
-      title: Text(
-        title,
-        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
-      ),
-      subtitle: Text(
-        subtitle,
-        style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-      ),
-      trailing: Icon(
-        Icons.arrow_forward_ios,
-        size: 16,
-        color: Colors.grey[400],
-      ),
-    );
+    return _MenuRow(icon: icon, title: title, subtitle: subtitle, onTap: onTap);
   }
 
   Widget _buildSimpleMenuItem({
@@ -839,25 +949,87 @@ class _ProfileScreenState extends State<ProfileScreen> {
     required String title,
     required VoidCallback onTap,
   }) {
-    return ListTile(
-      onTap: onTap,
-      leading: Icon(icon, color: Colors.grey[700], size: 22),
-      title: Text(
-        title,
-        style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 15),
-      ),
-      trailing: Icon(
-        Icons.arrow_forward_ios,
-        size: 16,
-        color: Colors.grey[400],
-      ),
-    );
+    return _MenuRow(icon: icon, title: title, onTap: onTap);
   }
 
   Widget _buildDivider() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Divider(height: 1, color: Colors.grey[200]),
+    return const Divider(height: 1, indent: 62, color: VxrTokens.border);
+  }
+}
+
+/// A single menu row in the Variation B profile menu card — 36×36 accentSoft
+/// icon tile, two-line text, trailing chevron.
+class _MenuRow extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String? subtitle;
+  final VoidCallback onTap;
+  final bool enabled;
+  final Widget? trailing;
+
+  const _MenuRow({
+    required this.icon,
+    required this.title,
+    this.subtitle,
+    required this.onTap,
+    this.enabled = true,
+    this.trailing,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final t = VxrTheme.of(context);
+    final iconColor = enabled ? t.accent : t.textMuted;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: enabled ? onTap : null,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+          child: Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: enabled ? t.accentSoft : t.surface2,
+                  borderRadius: BorderRadius.circular(11),
+                ),
+                child: Icon(icon, color: iconColor, size: 18),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      title,
+                      style: GoogleFonts.dmSans(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: enabled ? t.text : t.textMuted,
+                      ),
+                    ),
+                    if (subtitle != null) ...[
+                      const SizedBox(height: 1),
+                      Text(
+                        subtitle!,
+                        style: GoogleFonts.dmSans(
+                          fontSize: 10,
+                          color: t.textSub,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              trailing ??
+                  Icon(Icons.chevron_right, color: t.textMuted, size: 18),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

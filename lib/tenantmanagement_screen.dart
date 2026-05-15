@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
+import 'theme/vxr_theme.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'chat_thread_screen.dart';
+import 'move_out_checklist_screen.dart';
 import 'payment_screen.dart';
 import 'property_data.dart';
 import 'report_management_screen.dart';
@@ -19,13 +23,13 @@ import 'report_management_screen.dart';
 class TenantManagementScreen extends StatefulWidget {
   const TenantManagementScreen({super.key});
 
-  static const Color brand = Color(0xFFF36C6C);
-  static const Color coral = Color(0xFFE8735A);
-  static const Color light = Color(0xFFFF8A80);
-  static const Color ink = Color(0xFF101321);
-  static const Color muted = Color(0xFF6B7280);
-  static const Color bg = Color(0xFFFAF7F6);
-  static const Color border = Color(0xFFEFE7E5);
+  static const Color brand = VxrTokens.accent;
+  static const Color coral = VxrTokens.gradMid;
+  static const Color light = VxrTokens.gradEnd;
+  static const Color ink = VxrTokens.text;
+  static const Color muted = VxrTokens.textSub;
+  static const Color bg = VxrTokens.bg;
+  static const Color border = VxrTokens.border;
 
   @override
   State<TenantManagementScreen> createState() =>
@@ -47,7 +51,7 @@ class _TenantManagementScreenState extends State<TenantManagementScreen> {
   Future<void> _refresh() async {
     setState(() => _loading = true);
     final results = await Future.wait([
-      fetchActiveTenants(),
+      fetchActiveTenantsAll(),
       fetchLandlordReports(),
     ]);
     if (!mounted) return;
@@ -183,9 +187,9 @@ class _TenantManagementScreenState extends State<TenantManagementScreen> {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            Color(0xFFFF8A80),
-            Color(0xFFF36C6C),
-            Color(0xFFE8735A),
+            VxrTokens.gradEnd,
+            VxrTokens.accent,
+            VxrTokens.gradMid,
           ],
         ),
       ),
@@ -656,18 +660,232 @@ class _TenantManagementScreenState extends State<TenantManagementScreen> {
                 child: _action(
                   icon: Icons.chat_bubble_outline,
                   label: 'Chat',
-                  onTap: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Chat coming soon')),
-                    );
-                  },
+                  onTap: () => _openChat(t),
                 ),
               ),
             ],
           ),
+          _tenantTerminationRow(t),
         ],
       ),
     );
+  }
+
+  // ── Termination / Move-out row per tenant ─────────────────────────
+
+  Widget _tenantTerminationRow(Map<String, dynamic> t) {
+    final contractId = t['id']?.toString() ?? '';
+    final contractStatus = t['status']?.toString() ?? 'paid';
+    final listingId = t['listing_id']?.toString() ?? '';
+    final listingType = t['listing_type']?.toString() ?? 'rent';
+    final isTerminating = const {'terminating', 'expiring', 'ended'}.contains(contractStatus);
+    final canInitiate = contractStatus == 'paid';
+
+    if (!isTerminating && !canInitiate) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: isTerminating
+          ? SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: () async {
+                  await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => MoveOutChecklistScreen(
+                        contractId: contractId,
+                        listingId: listingId,
+                      ),
+                    ),
+                  );
+                  _refresh();
+                },
+                icon: const Icon(Icons.checklist_outlined, size: 16),
+                label: const Text('Move-Out Checklist'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFEF4444),
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10)),
+                  textStyle: const TextStyle(
+                      fontSize: 13, fontWeight: FontWeight.w600),
+                ),
+              ),
+            )
+          : SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () => _initiateTermination(
+                    context, t, contractId, listingType),
+                icon: const Icon(Icons.exit_to_app, size: 16),
+                label: const Text('Initiate Termination'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFFEF4444),
+                  side: const BorderSide(color: Color(0xFFEF4444)),
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10)),
+                  textStyle: const TextStyle(
+                      fontSize: 13, fontWeight: FontWeight.w600),
+                ),
+              ),
+            ),
+    );
+  }
+
+  Future<void> _initiateTermination(BuildContext context,
+      Map<String, dynamic> t, String contractId, String listingType) async {
+    final isFixedTerm = listingType == 'lease';
+    final reasonCtrl = TextEditingController();
+    String selectedType = isFixedTerm ? 'mutual' : 'notice';
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) {
+        return StatefulBuilder(builder: (ctx, setSheet) {
+          return Padding(
+            padding: EdgeInsets.only(
+                bottom: MediaQuery.of(ctx).viewInsets.bottom,
+                left: 20,
+                right: 20,
+                top: 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Initiate Termination',
+                    style: TextStyle(
+                        fontSize: 16, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 12),
+                if (isFixedTerm) ...[
+                  DropdownButtonFormField<String>(
+                    initialValue: selectedType,
+                    decoration: InputDecoration(
+                        labelText: 'Termination Type',
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10))),
+                    items: const [
+                      DropdownMenuItem(
+                          value: 'mutual',
+                          child: Text('Mutual Termination')),
+                      DropdownMenuItem(
+                          value: 'non_renewal',
+                          child: Text('Non-Renewal')),
+                      DropdownMenuItem(
+                          value: 'eviction', child: Text('Eviction')),
+                    ],
+                    onChanged: (v) =>
+                        setSheet(() => selectedType = v ?? selectedType),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+                TextField(
+                  controller: reasonCtrl,
+                  maxLines: 3,
+                  decoration: InputDecoration(
+                    labelText: 'Reason (required)',
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () async {
+                      if (reasonCtrl.text.trim().isEmpty) return;
+                      Navigator.pop(ctx);
+                      final now = DateTime.now();
+                      final depositAmt =
+                          (t['security_deposit'] as num?)?.toDouble() ?? 0.0;
+                      final effectiveDate = selectedType == 'notice'
+                          ? now.add(const Duration(days: 30))
+                          : now.add(const Duration(days: 1));
+                      await requestTermination(
+                        contractId: contractId,
+                        type: selectedType,
+                        initiatedBy: 'landlord',
+                        noticeDate: now,
+                        effectiveDate: effectiveDate,
+                        reason: reasonCtrl.text.trim(),
+                        securityDepositAmount: depositAmt,
+                      );
+                      if (mounted) _refresh();
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFEF4444),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                    ),
+                    child: const Text('Confirm'),
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
+            ),
+          );
+        });
+      },
+    );
+  }
+
+  // ── Actions ───────────────────────────────────────────────────────
+
+  Future<void> _openChat(Map<String, dynamic> t) async {
+    final me = Supabase.instance.client.auth.currentUser?.id;
+    final tenantId = t['tenant_id']?.toString();
+    final listingId = t['listing_id']?.toString();
+    if (me == null || tenantId == null) return;
+
+    final messenger = ScaffoldMessenger.of(context);
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(
+        child: CircularProgressIndicator(
+            color: TenantManagementScreen.brand),
+      ),
+    );
+    final convId = await getOrCreateConversation(
+      landlordId: me,
+      tenantId: tenantId,
+      listingId: listingId,
+    );
+    if (!mounted) return;
+    Navigator.of(context).pop(); // close loader
+
+    if (convId == null) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Could not open chat. Try again.')),
+      );
+      return;
+    }
+
+    final profile = (t['tenant_profile'] as Map?) ?? {};
+    final app = (t['application'] as Map?) ?? {};
+    final listing = (t['listings'] as Map?) ?? {};
+
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ChatThreadScreen(
+          conversationId: convId,
+          otherName: _resolveName(profile, app),
+          otherAvatarUrl:
+              profile['avatar_url']?.toString() ?? '',
+          listingTitle: listing['title']?.toString(),
+        ),
+      ),
+    );
+    if (mounted) _refresh();
   }
 
   // ── Sub-widgets ───────────────────────────────────────────────────

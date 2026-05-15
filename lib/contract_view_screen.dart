@@ -2,9 +2,13 @@ import 'dart:convert';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'theme/vxr_theme.dart';
+import 'theme/vxr_widgets.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
-import 'payment_screen.dart';
+import 'contract_templates.dart';
+import 'contract_payment_screen.dart';
 import 'property_data.dart';
 
 /// Contract viewing + signing screen used by both tenant and landlord.
@@ -35,8 +39,8 @@ class ContractViewScreen extends StatefulWidget {
 }
 
 class _ContractViewScreenState extends State<ContractViewScreen> {
-  static const _kPrimary = Color(0xfff36c6c);
-  static const _kSuccess = Color(0xFF4CAF50);
+  static const _kPrimary = VxrTokens.accent;
+  static const _kSuccess = VxrTokens.success;
 
   bool _loading = true;
   bool _saving = false;
@@ -87,7 +91,8 @@ class _ContractViewScreenState extends State<ContractViewScreen> {
       final details = await fetchListingDetails(widget.listingId);
       final core = await supa
           .from('listings')
-          .select('id, title, listing_type, landlord_id')
+          .select('id, title, listing_type, landlord_id, '
+              'contract_template_url, contract_template_name, terms_override')
           .eq('id', widget.listingId)
           .maybeSingle();
       if (details == null && core == null) {
@@ -262,11 +267,13 @@ class _ContractViewScreenState extends State<ContractViewScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => PaymentScreen(
+        builder: (_) => ContractPaymentScreen(
           contractId: _contract!['id'].toString(),
-          amountPhp: monthlyRent + deposit + advance,
-          summaryLabel:
-              '1 month rent + security deposit + advance payment',
+          amountPhp: (monthlyRent + deposit + advance).round(),
+          listingTitle: _listing?['title']?.toString(),
+          monthlyRent: monthlyRent.round(),
+          securityDeposit: deposit.round(),
+          advancePayment: advance.round(),
         ),
       ),
     );
@@ -275,14 +282,14 @@ class _ContractViewScreenState extends State<ContractViewScreen> {
   @override
   Widget build(BuildContext context) {
     final scaffold = Scaffold(
-      backgroundColor: const Color(0xFFF7F7F8),
+      backgroundColor: VxrTokens.bg,
       appBar: AppBar(
+        flexibleSpace: const DecoratedBox(
+          decoration: BoxDecoration(gradient: VxrTokens.brandGradient),
+        ),
         title: Text(_listingType == 'rent'
-            ? 'Month-to-Month Rental Agreement'
-            : 'Residential Lease Agreement'),
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black,
-        elevation: 0.5,
+            ? 'Rental Agreement'
+            : 'Lease Agreement'),
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -350,20 +357,12 @@ class _ContractViewScreenState extends State<ContractViewScreen> {
         if (_canPay)
           Padding(
             padding: const EdgeInsets.only(top: 16),
-            child: ElevatedButton.icon(
-              onPressed: _proceedToPayment,
-              icon: const Icon(Icons.payments_outlined),
-              label: Text(_statusKey == 'paid'
+            child: VxrPrimaryButton(
+              label: _statusKey == 'paid'
                   ? 'View Payment Details'
-                  : 'Proceed to Payment'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: _kPrimary,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
+                  : 'Proceed to Payment',
+              icon: Icons.payments_outlined,
+              onPressed: _proceedToPayment,
             ),
           ),
       ],
@@ -432,9 +431,9 @@ class _ContractViewScreenState extends State<ContractViewScreen> {
     final term = _listing?['lease_term']?.toString() ?? '—';
 
     final isLease = _listingType != 'rent';
-    final title = isLease
-        ? 'RESIDENTIAL LEASE AGREEMENT'
-        : 'MONTH-TO-MONTH RENTAL AGREEMENT';
+    final title = contractTitleForType(_listingType);
+    final terms = _resolveTerms();
+    final uploadedContract = _resolveUploadedContract();
 
     return Container(
       padding: const EdgeInsets.all(18),
@@ -470,12 +469,16 @@ class _ContractViewScreenState extends State<ContractViewScreen> {
           _kvRow('Advance Rent (PHP)', advance),
           _kvRow(isLease ? 'Lease Term' : 'Initial Term',
               isLease ? term : 'Month-to-Month (auto-renews)'),
+          if (uploadedContract != null) ...[
+            const SizedBox(height: 14),
+            _uploadedContractBanner(uploadedContract),
+          ],
           const SizedBox(height: 14),
           const Text('TERMS AND CONDITIONS',
               style: TextStyle(
                   fontWeight: FontWeight.bold, color: Color(0xff1f3a68))),
           const SizedBox(height: 8),
-          ..._termsForType(isLease).map((t) => Padding(
+          ...terms.map((t) => Padding(
                 padding: const EdgeInsets.only(bottom: 10),
                 child: Text(t, style: const TextStyle(fontSize: 13, height: 1.45)),
               )),
@@ -484,38 +487,99 @@ class _ContractViewScreenState extends State<ContractViewScreen> {
     );
   }
 
-  List<String> _termsForType(bool isLease) {
-    if (isLease) {
-      return const [
-        '1. FIXED-TERM LEASE — This Lease Agreement is binding for the duration stated above. Neither party may terminate before the end date without mutual written consent or valid legal grounds. Early termination by the Tenant shall result in forfeiture of the security deposit unless otherwise agreed in writing.',
-        '2. RENT PAYMENT — Tenant agrees to pay the monthly rent on or before the due date each month. Late payment fees apply after the grace period.',
-        '3. SECURITY DEPOSIT — The security deposit shall be returned within 30 days after the lease ends, less any deductions for unpaid rent, damages beyond normal wear and tear, or outstanding utility bills.',
-        '4. RENT INCREASE — The monthly rent is fixed for the entire lease term. Any adjustment shall only take effect upon renewal of this agreement, subject to at least 60 days prior written notice.',
-        '5. USE OF PREMISES — Premises shall be used exclusively as a private residential dwelling. Subletting requires the prior written consent of the Landlord.',
-        '6. UTILITIES & SERVICES — Tenant shall be responsible for utility accounts as agreed and must settle all utility bills before vacating.',
-        '7. MAINTENANCE & REPAIRS — Tenant agrees to keep the premises clean and in good condition. Major structural repairs shall be borne by the Landlord with prompt written notice.',
-        '8. HOUSE RULES — No pets unless permitted in writing; quiet hours 10:00 PM – 7:00 AM; overnight guests staying more than 7 consecutive days must be declared.',
-        '9. LEASE RENEWAL — At least 60 days before lease expiry, either party must notify the other of intent to renew or terminate. If no notice is given, the lease converts to a month-to-month rental agreement under the same terms.',
-        '10. TERMINATION & EVICTION — Landlord may terminate this lease for non-payment of rent for two or more consecutive months, serious breach of any provision, or use of the property for illegal activities. Eviction shall follow R.A. 9653 (Rent Control Act).',
-        '11. GOVERNING LAW — Governed by the laws of the Republic of the Philippines.',
-        '12. ENTIRE AGREEMENT — This Agreement constitutes the entire agreement between the parties; amendments must be in writing and signed by both parties.',
-      ];
+  /// Resolve the terms shown on the contract: the landlord's
+  /// per-listing override (if any) wins; otherwise we fall back to
+  /// the per-type defaults.
+  List<String> _resolveTerms() {
+    final raw = _listing?['terms_override'];
+    if (raw is List) {
+      final coerced = raw
+          .map((e) => e?.toString() ?? '')
+          .where((s) => s.isNotEmpty)
+          .toList();
+      if (coerced.isNotEmpty) return coerced;
+    } else if (raw is String && raw.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(raw);
+        if (decoded is List) {
+          final coerced = decoded
+              .map((e) => e?.toString() ?? '')
+              .where((s) => s.isNotEmpty)
+              .toList();
+          if (coerced.isNotEmpty) return coerced;
+        }
+      } catch (_) {/* fall through */}
     }
-    return const [
-      '1. MONTH-TO-MONTH TENANCY — This Rental Agreement creates a month-to-month tenancy that auto-renews each month unless terminated with the required written notice.',
-      '2. TERMINATION NOTICE — Either party may terminate by providing at least 30 days written notice. Tenant remains liable for rent during the notice period regardless of early vacating.',
-      '3. RENT PAYMENT — Tenant agrees to pay the monthly rent on or before the due date each month. Late payment fees apply after the grace period.',
-      '4. RENT ADJUSTMENT — Landlord may adjust the monthly rent with at least 30 days prior written notice. Tenant may accept the new rent or terminate the agreement under Clause 2. No adjustment shall violate R.A. 9653.',
-      '5. SECURITY DEPOSIT — Returned within 30 days after the Tenant fully vacates, less lawful deductions. Not applied as last-month\'s rent without written consent of the Landlord.',
-      '6. USE OF PREMISES — Premises shall be used exclusively as a private residential dwelling. Commercial use, subletting, and assignment are prohibited without prior written consent.',
-      '7. UTILITIES & SERVICES — Tenant is responsible for utility accounts as agreed. All utility accounts must be settled before vacating.',
-      '8. MAINTENANCE & REPAIRS — Tenant shall maintain the premises in a clean and habitable condition. No structural alterations without written approval.',
-      '9. HOUSE RULES — Quiet hours 10:00 PM – 7:00 AM; declare guests staying beyond 7 consecutive days; pets only if permitted in writing.',
-      '10. LANDLORD ACCESS — Landlord may enter for inspection or repairs with at least 24 hours prior notice (except in emergencies).',
-      '11. NON-PAYMENT & BREACH — Failure to pay rent for two consecutive months, or serious breach of any provision, entitles the Landlord to terminate and initiate eviction proceedings under Philippine law.',
-      '12. GOVERNING LAW — Governed by the laws of the Republic of the Philippines, including R.A. 9653.',
-      '13. ENTIRE AGREEMENT — This Agreement represents the full understanding between the parties; amendments must be in writing.',
-    ];
+    return defaultTermsForType(_listingType);
+  }
+
+  /// Public URL + filename for a landlord-uploaded contract file,
+  /// or null if the listing is using the in-app default template.
+  ({String url, String name})? _resolveUploadedContract() {
+    final path = _listing?['contract_template_url']?.toString();
+    if (path == null || path.isEmpty) return null;
+    final name = _listing?['contract_template_name']?.toString() ??
+        path.split('/').last;
+    final publicUrl = Supabase.instance.client.storage
+        .from('listing-contracts')
+        .getPublicUrl(path);
+    return (url: publicUrl, name: name);
+  }
+
+  Widget _uploadedContractBanner(({String url, String name}) info) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF8F0),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFFFE0C0)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.picture_as_pdf_outlined,
+              color: Color(0xFFE07820), size: 22),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Landlord-provided contract',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFFE07820),
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  info.name,
+                  style: const TextStyle(fontSize: 12, color: Colors.black87),
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 2),
+                const Text(
+                  'The terms below summarize the agreement; refer to the '
+                  'attached file for the binding text.',
+                  style: TextStyle(fontSize: 11, color: Colors.black54),
+                ),
+              ],
+            ),
+          ),
+          TextButton.icon(
+            onPressed: () async {
+              final uri = Uri.parse(info.url);
+              if (await canLaunchUrl(uri)) {
+                await launchUrl(uri, mode: LaunchMode.externalApplication);
+              }
+            },
+            icon: const Icon(Icons.open_in_new, size: 14),
+            label: const Text('Open'),
+            style: TextButton.styleFrom(foregroundColor: _kPrimary),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _existingSignaturesCard() {
@@ -668,26 +732,11 @@ class _ContractViewScreenState extends State<ContractViewScreen> {
             ),
           ),
           const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: _saving ? null : _submitSignature,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: _kSuccess,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10)),
-              ),
-              child: _saving
-                  ? const SizedBox(
-                      height: 18,
-                      width: 18,
-                      child: CircularProgressIndicator(
-                          color: Colors.white, strokeWidth: 2))
-                  : const Text('Submit Signature',
-                      style: TextStyle(fontWeight: FontWeight.bold)),
-            ),
+          VxrPrimaryButton(
+            label: 'Sign Contract',
+            icon: Icons.draw_outlined,
+            loading: _saving,
+            onPressed: _submitSignature,
           ),
         ],
       ),

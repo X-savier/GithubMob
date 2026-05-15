@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
+import 'theme/vxr_theme.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'chat_thread_screen.dart';
+import 'contract_payment_screen.dart';
 import 'payment_screen.dart';
 import 'property_data.dart';
 import 'report_management_screen.dart';
@@ -21,20 +25,21 @@ class InStayDashboardScreen extends StatefulWidget {
 }
 
 class _InStayDashboardScreenState extends State<InStayDashboardScreen> {
-  static const _brand = Color(0xFFF36C6C);
-  static const _coral = Color(0xFFE8735A);
-  static const _light = Color(0xFFFF8A80);
-  static const _ink = Color(0xFF101321);
-  static const _muted = Color(0xFF6B7280);
-  static const _bg = Color(0xFFFAF7F6);
-  static const _surface = Colors.white;
-  static const _border = Color(0xFFEFE7E5);
-  static const _success = Color(0xFF22C55E);
-  static const _warn = Color(0xFFF59E0B);
-  static const _danger = Color(0xFFEF4444);
+  static const _brand = VxrTokens.accent;
+  static const _coral = VxrTokens.gradMid;
+  static const _light = VxrTokens.gradEnd;
+  static const _ink = VxrTokens.text;
+  static const _muted = VxrTokens.textSub;
+  static const _bg = VxrTokens.bg;
+  static const _surface = VxrTokens.surface;
+  static const _border = VxrTokens.border;
+  static const _success = VxrTokens.success;
+  static const _warn = VxrTokens.warning;
+  static const _danger = VxrTokens.danger;
 
   bool _loading = true;
   Map<String, dynamic>? _rental;
+  Map<String, dynamic>? _termination;
   List<Map<String, dynamic>> _recentReports = [];
 
   @override
@@ -46,17 +51,87 @@ class _InStayDashboardScreenState extends State<InStayDashboardScreen> {
   Future<void> _refresh() async {
     setState(() => _loading = true);
     final results = await Future.wait([
-      fetchMyActiveRental(),
+      fetchMyActiveContract(),
       fetchMyReports(),
     ]);
     if (!mounted) return;
+    final rental = results[0] as Map<String, dynamic>?;
+    Map<String, dynamic>? termination;
+    if (rental != null) {
+      termination = await getTermination(rental['id'].toString());
+    }
     setState(() {
-      _rental = results[0] as Map<String, dynamic>?;
+      _rental = rental;
+      _termination = termination;
       _recentReports = (results[1] as List<Map<String, dynamic>>)
           .take(3)
           .toList();
       _loading = false;
     });
+  }
+
+  Future<void> _openLandlordChat() async {
+    final me = Supabase.instance.client.auth.currentUser?.id;
+    final listing = (_rental?['listings'] as Map?) ?? {};
+    final landlordId = listing['landlord_id']?.toString();
+    final listingId = _rental?['listing_id']?.toString();
+    if (me == null || landlordId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No active rental yet.')),
+      );
+      return;
+    }
+
+    final messenger = ScaffoldMessenger.of(context);
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) =>
+          const Center(child: CircularProgressIndicator(color: _brand)),
+    );
+
+    final convId = await getOrCreateConversation(
+      landlordId: landlordId,
+      tenantId: me,
+      listingId: listingId,
+    );
+
+    Map<String, dynamic>? landlordProfile;
+    try {
+      landlordProfile = await Supabase.instance.client
+          .from('profiles')
+          .select('full_name, avatar_url')
+          .eq('id', landlordId)
+          .maybeSingle();
+    } catch (_) {
+      landlordProfile = null;
+    }
+
+    if (!mounted) return;
+    Navigator.of(context).pop(); // close loader
+
+    if (convId == null) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Could not open chat. Try again.')),
+      );
+      return;
+    }
+
+    final name = (landlordProfile?['full_name']?.toString().trim() ?? '');
+    final avatar = landlordProfile?['avatar_url']?.toString() ?? '';
+
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ChatThreadScreen(
+          conversationId: convId,
+          otherName: name.isEmpty ? 'Your Landlord' : name,
+          otherAvatarUrl: avatar,
+          listingTitle: listing['title']?.toString(),
+        ),
+      ),
+    );
+    if (mounted) _refresh();
   }
 
   // ── Derived properties ────────────────────────────────────────────
@@ -114,6 +189,38 @@ class _InStayDashboardScreenState extends State<InStayDashboardScreen> {
     return 'Due in ${d}d';
   }
 
+  // ── Termination derived ───────────────────────────────────────────
+
+  String get _contractStatus =>
+      _rental?['status']?.toString() ?? 'paid';
+
+  bool get _isTerminating =>
+      const {'terminating', 'expiring', 'ended'}.contains(_contractStatus);
+
+  DateTime? get _effectiveEnd {
+    final iso = _rental?['effective_end_date']?.toString() ??
+        _termination?['effective_date']?.toString();
+    return iso == null ? null : DateTime.tryParse(iso);
+  }
+
+  int get _daysUntilEffective =>
+      _effectiveEnd?.difference(DateTime.now()).inDays ?? 0;
+
+  bool get _canConfirmVacated =>
+      _isTerminating && _daysUntilEffective <= 0 &&
+      _termination?['tenant_vacated_confirmed_at'] == null;
+
+  bool get _alreadyVacated =>
+      _termination?['tenant_vacated_confirmed_at'] != null;
+
+  bool get _isMutualPending =>
+      _contractStatus == 'paid' &&
+      _termination != null &&
+      _termination!['mutual_proposed_at'] != null &&
+      (_termination!['mutual_accepted_by_tenant_at'] == null ||
+          _termination!['mutual_accepted_by_landlord_at'] == null) &&
+      _termination!['mutual_withdrawn_at'] == null;
+
   // ── Build ─────────────────────────────────────────────────────────
 
   @override
@@ -149,6 +256,8 @@ class _InStayDashboardScreenState extends State<InStayDashboardScreen> {
                                   children: [
                                     _nextPaymentCard(),
                                     const SizedBox(height: 18),
+                                    if (_isTerminating || _isMutualPending) ...
+                                      [_terminationBanner(context), const SizedBox(height: 18)],
                                     _quickStats(),
                                     const SizedBox(height: 18),
                                     _quickActions(context),
@@ -196,16 +305,12 @@ class _InStayDashboardScreenState extends State<InStayDashboardScreen> {
 
   Widget _emptyState(BuildContext context) {
     return Scaffold(
+      backgroundColor: _bg,
       appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0.5,
-        title: const Text('My Rental',
-            style: TextStyle(
-                color: _ink, fontWeight: FontWeight.bold)),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: _ink),
-          onPressed: () => Navigator.pop(context),
+        flexibleSpace: const DecoratedBox(
+          decoration: BoxDecoration(gradient: VxrTokens.brandGradient),
         ),
+        title: const Text('My Rental'),
       ),
       body: Center(
         child: Padding(
@@ -246,13 +351,7 @@ class _InStayDashboardScreenState extends State<InStayDashboardScreen> {
     return Container(
       width: double.infinity,
       padding: EdgeInsets.fromLTRB(20, topInset + 56, 20, 70),
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [_light, _brand, _coral],
-        ),
-      ),
+      decoration: const BoxDecoration(gradient: VxrTokens.brandGradient),
       child: Stack(
         clipBehavior: Clip.hardEdge,
         children: [
@@ -461,11 +560,11 @@ class _InStayDashboardScreenState extends State<InStayDashboardScreen> {
                 await Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (_) => PaymentScreen(
+                    builder: (_) => ContractPaymentScreen(
                       contractId: _rental!['id'].toString(),
-                      amountPhp: _rent,
-                      summaryLabel:
-                          'Monthly rent — ${_rental?['listings']?['title'] ?? ''}',
+                      amountPhp: _rent.round(),
+                      listingTitle:
+                          (_rental?['listings']?['title'] ?? '').toString(),
                     ),
                   ),
                 );
@@ -572,56 +671,216 @@ class _InStayDashboardScreenState extends State<InStayDashboardScreen> {
     );
   }
 
-  // ── Quick actions row ─────────────────────────────────────────────
+  // ── Termination banner ────────────────────────────────────────────
 
-  Widget _quickActions(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: _actionTile(
-            icon: Icons.receipt_long_outlined,
-            label: 'Payments',
-            color: _brand,
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => PaymentScreen(
-                  contractId: _rental!['id'].toString(),
+  Widget _terminationBanner(BuildContext context) {
+    final isMutualPending = _isMutualPending;
+    final daysLeft = _daysUntilEffective;
+    final effectiveDateStr = _effectiveEnd == null
+        ? '—'
+        : '${_monthName(_effectiveEnd!.month)} ${_effectiveEnd!.day}, ${_effectiveEnd!.year}';
+
+    String title;
+    String body;
+    Color bannerColor;
+    IconData bannerIcon;
+
+    if (isMutualPending) {
+      title = 'Mutual Termination Pending';
+      body = 'A mutual termination has been proposed and is awaiting both parties to accept.';
+      bannerColor = _warn;
+      bannerIcon = Icons.handshake_outlined;
+    } else if (_contractStatus == 'ended') {
+      title = 'Lease Ended';
+      body = 'Your lease term has ended. Please confirm that you have vacated.';
+      bannerColor = _danger;
+      bannerIcon = Icons.door_front_door_outlined;
+    } else {
+      title = 'Termination in Progress';
+      body = daysLeft > 0
+          ? '$daysLeft day${daysLeft == 1 ? '' : 's'} until effective date ($effectiveDateStr).'
+          : 'Effective date has passed ($effectiveDateStr). Please confirm you have vacated.';
+      bannerColor = daysLeft > 0 ? _warn : _danger;
+      bannerIcon = Icons.warning_amber_rounded;
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: bannerColor.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: bannerColor.withValues(alpha: 0.35)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(bannerIcon, color: bannerColor, size: 18),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(title,
+                    style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                        color: bannerColor)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(body,
+              style: TextStyle(fontSize: 12, color: bannerColor, height: 1.4)),
+          if (isMutualPending) ...[
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () async {
+                      final ok = await acceptMutualTermination(
+                        contractId: _rental!['id'].toString(),
+                        terminationId: _termination!['id'].toString(),
+                        acceptingRole: 'tenant',
+                      );
+                      if (ok && mounted) _refresh();
+                    },
+                    style: OutlinedButton.styleFrom(
+                        foregroundColor: _success,
+                        side: const BorderSide(color: _success)),
+                    child: const Text('Accept', style: TextStyle(fontSize: 12)),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () async {
+                      final ok = await withdrawMutualTermination(
+                        contractId: _rental!['id'].toString(),
+                        terminationId: _termination!['id'].toString(),
+                      );
+                      if (ok && mounted) _refresh();
+                    },
+                    style: OutlinedButton.styleFrom(
+                        foregroundColor: _danger,
+                        side: const BorderSide(color: _danger)),
+                    child: const Text('Withdraw', style: TextStyle(fontSize: 12)),
+                  ),
+                ),
+              ],
+            ),
+          ] else if (_canConfirmVacated) ...[
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: () async {
+                  final ok = await confirmTenantVacated(
+                    contractId: _rental!['id'].toString(),
+                    terminationId: _termination!['id'].toString(),
+                  );
+                  if (ok && mounted) _refresh();
+                },
+                icon: const Icon(Icons.check_circle_outline, size: 16),
+                label: const Text('Confirm I Have Vacated'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: bannerColor,
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10)),
+                  textStyle: const TextStyle(
+                      fontSize: 13, fontWeight: FontWeight.bold),
                 ),
               ),
             ),
-          ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: _actionTile(
-            icon: Icons.build_outlined,
-            label: 'Reports',
-            color: _coral,
-            onTap: () async {
-              await Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => const ReportManagementScreen(),
+          ] else if (_alreadyVacated) ...[
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                Icon(Icons.check_circle, color: _success, size: 14),
+                const SizedBox(width: 4),
+                const Text('Vacated confirmed. Waiting for landlord to close.',
+                    style: TextStyle(fontSize: 11, color: _success)),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // ── Quick actions row ─────────────────────────────────────────────
+
+  Widget _quickActions(BuildContext context) {
+    final canRequestTermination = _contractStatus == 'paid' && _termination == null;
+    return Column(
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: _actionTile(
+                icon: Icons.receipt_long_outlined,
+                label: 'Payments',
+                color: _brand,
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => PaymentScreen(
+                      contractId: _rental!['id'].toString(),
+                    ),
+                  ),
                 ),
-              );
-              _refresh();
-            },
-          ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: _actionTile(
+                icon: Icons.build_outlined,
+                label: 'Reports',
+                color: _coral,
+                onTap: () async {
+                  await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const ReportManagementScreen(),
+                    ),
+                  );
+                  _refresh();
+                },
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: _actionTile(
+                icon: Icons.chat_bubble_outline,
+                label: 'Chat Landlord',
+                color: _light,
+                onTap: _openLandlordChat,
+              ),
+            ),
+          ],
         ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: _actionTile(
-            icon: Icons.support_agent_outlined,
-            label: 'Support',
-            color: _light,
-            onTap: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Support chat coming soon')),
-              );
-            },
+        if (canRequestTermination) ...[
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () => _showRequestTerminationSheet(context),
+              icon: const Icon(Icons.exit_to_app, size: 16),
+              label: const Text('Request Termination'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: _danger,
+                side: const BorderSide(color: _danger),
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
+                textStyle: const TextStyle(
+                    fontSize: 13, fontWeight: FontWeight.w600),
+              ),
+            ),
           ),
-        ),
+        ],
       ],
     );
   }
@@ -853,5 +1112,92 @@ class _InStayDashboardScreenState extends State<InStayDashboardScreen> {
       'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
     ];
     return months[(m - 1).clamp(0, 11)];
+  }
+
+  // ── Request Termination sheet ─────────────────────────────────────
+
+  Future<void> _showRequestTerminationSheet(BuildContext context) async {
+    final contractId = _rental!['id'].toString();
+    final listingType = _rental?['listing_type']?.toString() ?? 'rent';
+    final isFixedTerm = listingType == 'lease';
+    final depositAmt =
+        (_rental?['security_deposit'] as num?)?.toDouble() ?? 0.0;
+    final reasonCtrl = TextEditingController();
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) {
+        return Padding(
+          padding: EdgeInsets.only(
+              bottom: MediaQuery.of(ctx).viewInsets.bottom,
+              left: 20,
+              right: 20,
+              top: 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                isFixedTerm ? 'Propose Mutual Termination' : '30-Day Termination Notice',
+                style: const TextStyle(
+                    fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                isFixedTerm
+                    ? 'This will propose a mutual termination. The landlord must also accept before the contract is cancelled.'
+                    : 'This will file a 30-day notice. Your tenancy ends 30 days from today.',
+                style: TextStyle(fontSize: 13, color: Colors.grey.shade600, height: 1.4),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: reasonCtrl,
+                maxLines: 3,
+                decoration: InputDecoration(
+                  labelText: 'Reason (required)',
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () async {
+                    if (reasonCtrl.text.trim().isEmpty) return;
+                    Navigator.pop(ctx);
+                    final now = DateTime.now();
+                    final effectiveDate =
+                        isFixedTerm ? now.add(const Duration(days: 1)) : now.add(const Duration(days: 30));
+                    final ok = await requestTermination(
+                      contractId: contractId,
+                      type: isFixedTerm ? 'mutual' : 'notice',
+                      initiatedBy: 'tenant',
+                      noticeDate: now,
+                      effectiveDate: effectiveDate,
+                      reason: reasonCtrl.text.trim(),
+                      securityDepositAmount: depositAmt,
+                    );
+                    if (ok && mounted) _refresh();
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _danger,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12)),
+                  ),
+                  child: Text(isFixedTerm ? 'Submit Proposal' : 'File Notice'),
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+          ),
+        );
+      },
+    );
   }
 }

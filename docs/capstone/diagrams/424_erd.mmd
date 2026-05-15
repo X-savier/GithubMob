@@ -1,0 +1,518 @@
+---
+config:
+  theme: neutral
+---
+erDiagram
+  %% ─── IDENTITY ───────────────────────────────────────────
+  profiles ||--o{ listings              : "owns"
+  profiles ||--o{ application           : "submits_as_tenant"
+  profiles ||--o{ application           : "reviews"
+  profiles ||--o{ contract              : "tenant_or_landlord"
+  profiles ||--o{ conversation          : "tenant_in"
+  profiles ||--o{ conversation          : "landlord_in"
+  profiles ||--o{ message               : "sends"
+  profiles ||--o{ bookmark              : "saves"
+  profiles ||--o{ review                : "writes"
+  profiles ||--o{ notification          : "receives"
+  profiles ||--o{ listing_image         : "uploads"
+  profiles ||--o{ listing_images        : "uploads_new"
+  profiles ||--o{ audit_log             : "actor_in"
+  profiles ||--o{ payment_intent        : "as_tenant"
+  profiles ||--o{ payment_intent        : "as_landlord"
+  profiles ||--o{ verifications         : "submits_kyc"
+  profiles ||--o{ cms_page              : "edits"
+  profiles ||--o{ cms_announcement      : "edits_announcement"
+  profiles ||--o{ cms_faq               : "edits_faq"
+
+  %% ─── LISTING HUB AND SPOKES ────────────────────────────
+  listings ||--o| listing_details         : "has_one"
+  listings ||--o| listing_locations       : "has_one"
+  listings ||--o| listing_amenities       : "has_one"
+  listings ||--o| listing_utilities       : "has_one"
+  listings ||--o| listing_building_features : "has_one"
+  listings ||--o| listing_financials      : "has_one"
+  listings ||--o| listing_availability    : "has_one"
+  listings ||--o| listing_policies        : "has_one"
+  listings ||--o| listing_requirements    : "has_one"
+  listings ||--o| listing_host_info       : "has_one"
+
+  listings ||--o{ listing_image         : "has_legacy_images"
+  listings ||--o{ listing_images        : "has_images"
+  listings ||--o{ listing_amenity       : "tagged_with"
+  amenity  ||--o{ listing_amenity       : "applies_to"
+
+  listings ||--o{ application           : "receives"
+  listings ||--o{ contract              : "subject_of"
+  listings ||--o{ conversation          : "discussed_in"
+  listings ||--o{ bookmark              : "is_saved_in"
+  listings ||--o{ review                : "is_reviewed_in"
+  listings ||--o{ report                : "scopes"
+  listings ||--o{ payment_intent        : "billed_under"
+
+  %% ─── APPLICATION ──────────────────────────────────────
+  application ||--o{ application_document : "has_uploads"
+  application ||--|| contract             : "produces"
+
+  %% ─── CONTRACT LIFECYCLE ───────────────────────────────
+  contract ||--o{ payment             : "is_paid_by_legacy"
+  contract ||--o{ report              : "tracks"
+  contract ||--o{ contract_event      : "logs"
+  contract ||--|| contract_termination : "ends_with"
+  contract_termination ||--o{ contract_deduction : "itemizes"
+
+  %% ─── PAYMENT (NEW PROVIDER-AGNOSTIC SUBSYSTEM) ────────
+  payment_provider ||--o{ payment_intent     : "configures"
+  payment_intent   ||--o{ payment_transaction : "captures"
+
+  %% ─── COMMUNICATION ────────────────────────────────────
+  conversation ||--o{ message : "contains"
+
+  %% ─── ENTITY DEFINITIONS ───────────────────────────────
+  profiles {
+    uuid id PK
+    text email
+    text role
+    text full_name
+    text phone
+    text avatar_url
+    boolean is_verified
+    boolean is_landlord
+    boolean is_active
+    text verification_id_type
+    text verification_decision
+    timestamptz verification_processed_at
+    timestamptz created_at
+  }
+
+  verifications {
+    uuid id PK
+    uuid user_id FK
+    text id_type
+    text id_front_path
+    text id_back_path
+    text selfie_path
+    jsonb ocr_data
+    text extracted_name
+    text extracted_id_number
+    numeric face_match_score
+    numeric ocr_confidence
+    numeric name_match_score
+    text decision
+    timestamptz processed_at
+    timestamptz created_at
+  }
+
+  amenity {
+    uuid id PK
+    text name UK
+  }
+
+  listings {
+    uuid id PK
+    uuid landlord_id FK
+    text title
+    text description
+    text property_type
+    text status
+    text listing_type
+    text cover_photo_url
+    boolean is_verified
+    text contract_template_url
+    text contract_template_name
+    jsonb terms_override
+    text verification_doc_url
+    timestamptz created_at
+  }
+
+  listing_details {
+    uuid id PK
+    uuid listing_id FK
+    text bedrooms
+    text bathrooms
+    int max_occupants
+    float square_meters
+    text furnishing
+    text flooring_type
+    int floor_number
+    int total_floors
+    int year_built
+    boolean has_balcony
+    boolean has_storage
+  }
+
+  listing_locations {
+    uuid id PK
+    uuid listing_id FK
+    text full_address
+    text barangay
+    text city
+    text province
+    text postal_code
+    text nearby_landmarks
+    float latitude
+    float longitude
+  }
+
+  listing_amenities {
+    uuid id PK
+    uuid listing_id FK
+    boolean has_aircon
+    boolean has_refrigerator
+    boolean has_washing_machine
+    boolean has_water_heater
+    boolean has_stove
+    boolean has_cabinet
+    boolean has_bed
+    text other_appliances
+  }
+
+  listing_utilities {
+    uuid id PK
+    uuid listing_id FK
+    boolean with_water
+    boolean with_electricity
+    boolean with_internet
+    boolean with_parking
+    text parking_type
+    float parking_fee
+  }
+
+  listing_building_features {
+    uuid id PK
+    uuid listing_id FK
+    boolean has_security
+    boolean has_elevator
+    boolean has_backup_power
+    boolean has_pool
+    boolean has_gym
+    boolean has_laundry_area
+    boolean has_function_hall
+    boolean has_playground
+  }
+
+  listing_financials {
+    uuid id PK
+    uuid listing_id FK
+    float monthly_rent
+    float security_deposit
+    float advance_payment
+    text payment_terms
+    text payment_method
+    float rent_escalation_rate
+    text escalation_frequency
+    float association_dues
+    boolean dues_included_in_rent
+  }
+
+  listing_availability {
+    uuid id PK
+    uuid listing_id FK
+    boolean is_immediate
+    date available_from
+    text lease_term
+    float early_termination_fee
+    boolean renewable
+  }
+
+  listing_policies {
+    uuid id PK
+    uuid listing_id FK
+    boolean pets_allowed
+    boolean smoking_allowed
+    boolean no_curfew
+    boolean subletting_allowed
+    text guest_policy
+    boolean modification_allowed
+  }
+
+  listing_requirements {
+    uuid id PK
+    uuid listing_id FK
+    boolean requires_proof_of_income
+    boolean requires_employment_cert
+    boolean requires_valid_id
+    boolean requires_references
+  }
+
+  listing_host_info {
+    uuid id PK
+    uuid listing_id FK
+    text host_name
+    text host_role
+    text response_time
+  }
+
+  listing_amenity {
+    uuid id PK
+    uuid listing_id FK
+    uuid amenity_id FK
+  }
+
+  listing_image {
+    uuid id PK
+    uuid listing_id FK
+    uuid uploaded_by FK
+    text url
+    text type
+    text upload_source
+    int sort_order
+    boolean is_cover
+    timestamptz created_at
+  }
+
+  listing_images {
+    uuid id PK
+    uuid listing_id FK
+    uuid uploaded_by FK
+    text image_url
+    text image_type
+    text upload_source
+    int sort_order
+    boolean is_cover
+    text room_label
+    timestamptz created_at
+  }
+
+  application {
+    uuid id PK
+    uuid listing_id FK
+    uuid tenant_id FK
+    uuid landlord_id FK
+    uuid reviewed_by FK
+    text status
+    text first_name
+    text last_name
+    text email
+    text employment_status
+    numeric monthly_income
+    text primary_id_type
+    boolean agreed_to_declaration
+    timestamptz submitted_at
+    timestamptz reviewed_at
+    text rejection_reason
+  }
+
+  application_document {
+    uuid id PK
+    uuid application_id FK
+    text document_type
+    text url
+    text file_name
+    timestamptz uploaded_at
+  }
+
+  contract {
+    uuid id PK
+    uuid application_id FK
+    uuid listing_id FK
+    uuid tenant_id FK
+    uuid landlord_id FK
+    text listing_type
+    text status
+    text tenant_signature
+    timestamptz tenant_signed_at
+    text landlord_signature
+    timestamptz landlord_signed_at
+    date start_date
+    date end_date
+    numeric monthly_rent
+    numeric security_deposit
+    text terminated_by
+    timestamptz actual_end_date
+    timestamptz created_at
+  }
+
+  contract_event {
+    uuid id PK
+    uuid contract_id FK
+    uuid actor_id FK
+    text event_type
+    jsonb payload
+    timestamptz created_at
+  }
+
+  contract_termination {
+    uuid id PK
+    uuid contract_id FK
+    text initiated_by
+    text type
+    date notice_date
+    date effective_date
+    text reason
+    numeric security_deposit_amount
+    numeric total_deductions
+    numeric amount_returned
+    timestamptz landlord_closed_at
+    timestamptz created_at
+  }
+
+  contract_deduction {
+    uuid id PK
+    uuid termination_id FK
+    text category
+    text description
+    numeric amount
+    text photo_url
+    timestamptz created_at
+  }
+
+  payment {
+    uuid id PK
+    uuid contract_id FK
+    text stripe_payment_intent_id UK
+    int amount_cents
+    text currency
+    text status
+    text method
+    text last4
+    timestamptz paid_at
+  }
+
+  payment_provider {
+    uuid id PK
+    text name
+    jsonb config
+    boolean is_enabled
+    timestamptz created_at
+  }
+
+  payment_intent {
+    uuid id PK
+    uuid listing_id FK
+    uuid tenant_id FK
+    uuid landlord_id FK
+    uuid provider_id FK
+    text type
+    numeric amount
+    text currency
+    text status
+    text provider_payment_id
+    text idempotency_key UK
+    timestamptz created_at
+  }
+
+  payment_transaction {
+    uuid id PK
+    uuid intent_id FK
+    numeric amount
+    text currency
+    text status
+    text provider_charge_id
+    jsonb provider_response
+    numeric refund_amount
+    timestamptz paid_at
+    timestamptz created_at
+  }
+
+  conversation {
+    uuid id PK
+    uuid listing_id FK
+    uuid tenant_id FK
+    uuid landlord_id FK
+    text last_message
+    timestamptz last_message_at
+    boolean is_archived
+    timestamptz created_at
+  }
+
+  message {
+    uuid id PK
+    uuid conversation_id FK
+    uuid sender_id FK
+    text type
+    text content
+    text url
+    text file_name
+    boolean is_read
+    timestamptz created_at
+  }
+
+  notification {
+    uuid id PK
+    uuid user_id FK
+    text type
+    text title
+    text body
+    uuid reference_id
+    text reference_type
+    boolean is_read
+    timestamptz created_at
+  }
+
+  bookmark {
+    uuid id PK
+    uuid user_id FK
+    uuid listing_id FK
+    timestamptz created_at
+  }
+
+  review {
+    uuid id PK
+    uuid listing_id FK
+    uuid reviewer_id FK
+    smallint rating
+    text comment
+    timestamptz created_at
+  }
+
+  report {
+    uuid id PK
+    uuid contract_id FK
+    uuid listing_id FK
+    uuid tenant_id FK
+    uuid landlord_id FK
+    text type
+    text priority
+    text status
+    text title
+    text description
+    text landlord_response
+    timestamptz resolved_at
+    timestamptz created_at
+  }
+
+  cms_page {
+    uuid id PK
+    text slug UK
+    text title
+    text body
+    text status
+    uuid updated_by FK
+    timestamptz updated_at
+  }
+
+  cms_announcement {
+    uuid id PK
+    text title
+    text body
+    text audience
+    text level
+    boolean is_active
+    timestamptz starts_at
+    timestamptz ends_at
+    uuid updated_by FK
+    timestamptz created_at
+  }
+
+  cms_faq {
+    uuid id PK
+    text category
+    text question
+    text answer
+    int sort_order
+    boolean is_published
+    uuid updated_by FK
+    timestamptz created_at
+  }
+
+  audit_log {
+    uuid id PK
+    uuid user_id FK
+    text action
+    text target_type
+    uuid target_id
+    text ip_address
+    text user_agent
+    text note
+    timestamptz created_at
+  }

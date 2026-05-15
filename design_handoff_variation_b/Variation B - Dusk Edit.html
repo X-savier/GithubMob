@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Variation B — Dusk Edit · Flutter Application</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=DM+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script type="text/babel" src="variation-b/ios-frame.jsx"></script>
+<script type="text/babel" src="variation-b/design-canvas.jsx"></script>
+<script type="text/babel" src="variation-b/screens.jsx"></script>
+<script type="text/babel" src="variation-b/patches.jsx"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; background: #1A1310; font-family: 'DM Sans', sans-serif; color: #F5F0EC; overflow: hidden; }
+  #root { width: 100%; height: 100%; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #3a322e; border-radius: 5px; }
+  ::-webkit-scrollbar-thumb:hover { background: #5a504a; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useMemo, useEffect } = React;
+
+const C = {
+  bg: '#1A1310', surface: '#221C19', surface2: '#2D2522',
+  border: '#3A322E', text: '#F5F0EC', textSub: '#A09590', textMuted: '#7A6E68',
+  accent: '#FF7043', accent2: '#FF8A80', accentSoft: 'rgba(255,112,67,0.15)',
+  grad: 'linear-gradient(135deg, #FF7043 0%, #FF5252 50%, #FF8A80 100%)',
+  fontHead: "'Plus Jakarta Sans', sans-serif",
+  fontMono: "'JetBrains Mono', monospace",
+};
+
+// ── TOP BAR ──────────────────────────────────────────────────────────────────
+function TopBar({ tab, onTab }) {
+  const tabs = [
+    { id: 'overview', label: 'Overview' },
+    { id: 'screens',  label: 'Screens'  },
+    { id: 'tokens',   label: 'Tokens'   },
+    { id: 'dart',     label: 'Drop-in Dart' },
+    { id: 'patches',  label: 'Patch Guide' },
+  ];
+  return (
+    <div style={{
+      flexShrink: 0, height: 64, background: C.surface,
+      borderBottom: `1px solid ${C.border}`,
+      display: 'flex', alignItems: 'center', padding: '0 24px',
+      gap: 32,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{
+          width: 32, height: 32, borderRadius: 9,
+          background: C.grad,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          boxShadow: '0 2px 12px rgba(255,112,67,0.4)',
+        }}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+            <path d="M3 9.5L12 3l9 6.5V21H3V9.5z" fill="white" />
+            <rect x="9" y="14" width="6" height="7" rx="1" fill="rgba(255,255,255,0.5)" />
+          </svg>
+        </div>
+        <div>
+          <div style={{ fontFamily: C.fontHead, fontWeight: 800, fontSize: 14, color: C.text, letterSpacing: '-0.2px' }}>
+            ViewxRent · Variation B
+          </div>
+          <div style={{ fontSize: 10, color: C.textSub, fontWeight: 500, letterSpacing: 0.5 }}>
+            DUSK EDIT · FLUTTER APPLICATION
+          </div>
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: 4, marginLeft: 16 }}>
+        {tabs.map(t => (
+          <div key={t.id} onClick={() => onTab(t.id)} style={{
+            padding: '8px 14px', borderRadius: 9,
+            cursor: 'pointer', fontSize: 12, fontWeight: 600,
+            background: tab === t.id ? C.accentSoft : 'transparent',
+            color: tab === t.id ? C.accent : C.textSub,
+            border: tab === t.id ? `1px solid ${C.accent}33` : '1px solid transparent',
+            transition: 'all 0.15s',
+          }}>{t.label}</div>
+        ))}
+      </div>
+      <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
+        <div style={{
+          padding: '5px 11px', borderRadius: 50,
+          background: 'rgba(34, 197, 94, 0.15)',
+          border: '1px solid rgba(34, 197, 94, 0.3)',
+          fontSize: 10, fontWeight: 700, color: '#4ade80',
+          display: 'flex', alignItems: 'center', gap: 6,
+        }}>
+          <div style={{ width: 6, height: 6, borderRadius: 50, background: '#4ade80' }} />
+          LIGHT MODE · ~30 SCREENS
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── OVERVIEW ─────────────────────────────────────────────────────────────────
+function Overview({ onTab }) {
+  const stats = [
+    { label: 'Screens patched', value: '24', sub: 'of ~30 in lib/ — 6 are pure data/services' },
+    { label: 'Drop-in Dart files', value: '2', sub: 'vxr_theme.dart + vxr_widgets.dart' },
+    { label: 'Reusable widgets', value: '9', sub: 'AppBar, SearchBar, Chip, PropertyCard, …' },
+    { label: 'Color tokens', value: '14', sub: 'plus brandGradient + 2 shadow presets' },
+  ];
+  const moves = [
+    {
+      title: 'Horizontal property cards',
+      copy: 'Image left, content right, favorite far right. Twice as dense as Variation A — every list shows ~3 cards instead of 1.5 in the first viewport.',
+    },
+    {
+      title: 'Square-bottom headers',
+      copy: 'No more rounded corners on Home / Search headers. Lets the gradient meet the chip rail cleanly and feels more grown-up.',
+    },
+    {
+      title: 'Surface header on Search',
+      copy: 'Search uses a light surface header (not gradient). Calmer surface for results-heavy task. Profile and Home keep their gradient.',
+    },
+    {
+      title: 'Warmer neutrals',
+      copy: '#F7F5F3 paper bg + #1A1310 ink. Reads as paper-and-ink rather than chrome-and-grey. Pulls the coral accent into the same temperature family.',
+    },
+  ];
+  return (
+    <div style={{ flex: 1, overflowY: 'auto', padding: '40px 56px' }}>
+      <div style={{ maxWidth: 1100, margin: '0 auto' }}>
+        <div style={{ display: 'flex', gap: 32, alignItems: 'flex-start', marginBottom: 40 }}>
+          <div style={{ flex: 2 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: C.accent, letterSpacing: 2, marginBottom: 12 }}>
+              VARIATION B · "DUSK EDIT"
+            </div>
+            <h1 style={{
+              fontFamily: C.fontHead, fontSize: 44, fontWeight: 800,
+              color: C.text, lineHeight: 1.1, letterSpacing: '-0.5px', marginBottom: 16,
+            }}>
+              The horizontal, surface-led<br />Flutter system.
+            </h1>
+            <p style={{ fontSize: 15, color: C.textSub, lineHeight: 1.6, maxWidth: 560 }}>
+              A drop-in re-skin of your Flutter app: same coral DNA, denser cards,
+              squarer headers, and a calmer Search surface. Light mode only — dark stays
+              available in the design system whenever you want to wire it.
+            </p>
+          </div>
+          <div style={{
+            flex: 1, padding: 20,
+            background: C.surface, border: `1px solid ${C.border}`,
+            borderRadius: 14,
+          }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: C.textSub, letterSpacing: 1.5, marginBottom: 12 }}>
+              GET GOING
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {[
+                ['1', 'Copy lib/theme/ Dart files', 'dart'],
+                ['2', 'Wire VxrTheme in main.dart', 'patches'],
+                ['3', 'Replace screen by screen', 'patches'],
+                ['4', 'Reference visuals as needed', 'screens'],
+              ].map(([n, label, target]) => (
+                <div key={n} onClick={() => onTab(target)} style={{
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  padding: '8px 10px', borderRadius: 8,
+                  background: C.surface2, cursor: 'pointer',
+                  border: `1px solid ${C.border}`,
+                }}>
+                  <div style={{
+                    width: 22, height: 22, borderRadius: 50,
+                    background: C.grad, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 10, fontWeight: 800, color: 'white', flexShrink: 0,
+                  }}>{n}</div>
+                  <span style={{ fontSize: 12, color: C.text, fontWeight: 500 }}>{label}</span>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={C.textMuted} strokeWidth="2.5" strokeLinecap="round" style={{ marginLeft: 'auto' }}><path d="M9 18l6-6-6-6"/></svg>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Stat tiles */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 40 }}>
+          {stats.map((s, i) => (
+            <div key={i} style={{
+              padding: '18px 18px',
+              background: C.surface, border: `1px solid ${C.border}`,
+              borderRadius: 14,
+            }}>
+              <div style={{
+                fontFamily: C.fontHead, fontSize: 32, fontWeight: 800,
+                color: C.text, lineHeight: 1, marginBottom: 6,
+              }}>{s.value}</div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: C.text, marginBottom: 4 }}>{s.label}</div>
+              <div style={{ fontSize: 10.5, color: C.textSub, lineHeight: 1.4 }}>{s.sub}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* The four moves */}
+        <div style={{ fontFamily: C.fontHead, fontSize: 11, fontWeight: 700, color: C.textSub, letterSpacing: 2, marginBottom: 14 }}>
+          THE FOUR MOVES
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 40 }}>
+          {moves.map((m, i) => (
+            <div key={i} style={{
+              padding: '20px 22px',
+              background: C.surface, border: `1px solid ${C.border}`,
+              borderRadius: 14, position: 'relative', overflow: 'hidden',
+            }}>
+              <div style={{
+                position: 'absolute', top: 16, right: 16,
+                fontFamily: C.fontHead, fontSize: 36, fontWeight: 800,
+                color: C.accent, opacity: 0.15, lineHeight: 1,
+              }}>0{i + 1}</div>
+              <div style={{
+                fontFamily: C.fontHead, fontSize: 16, fontWeight: 700,
+                color: C.text, marginBottom: 8, paddingRight: 30,
+              }}>{m.title}</div>
+              <div style={{ fontSize: 12.5, color: C.textSub, lineHeight: 1.55 }}>{m.copy}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Files shipped */}
+        <div style={{ fontFamily: C.fontHead, fontSize: 11, fontWeight: 700, color: C.textSub, letterSpacing: 2, marginBottom: 14 }}>
+          FILES IN THIS DELIVERY
+        </div>
+        <div style={{
+          background: C.surface, border: `1px solid ${C.border}`,
+          borderRadius: 14, overflow: 'hidden',
+        }}>
+          {[
+            ['variation-b/dart/vxr_theme.dart', 'Color tokens, ThemeData, VxrTheme inherited widget', '12 KB'],
+            ['variation-b/dart/vxr_widgets.dart', 'Reusable Variation B widgets — drop in lib/widgets/', '24 KB'],
+            ['Variation B — Dusk Edit.html', 'This document — visual spec, tokens, drop-in code, patch guide', '—'],
+          ].map(([path, desc, size], i, arr) => (
+            <div key={i} style={{
+              padding: '14px 18px',
+              borderBottom: i < arr.length - 1 ? `1px solid ${C.border}` : 'none',
+              display: 'flex', alignItems: 'center', gap: 14,
+            }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={C.accent} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6"/>
+              </svg>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontFamily: C.fontMono, fontSize: 12, color: C.text, fontWeight: 500 }}>{path}</div>
+                <div style={{ fontSize: 11, color: C.textSub, marginTop: 2 }}>{desc}</div>
+              </div>
+              <div style={{ fontSize: 10, color: C.textMuted, fontFamily: C.fontMono }}>{size}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── SCREENS (visual spec) ────────────────────────────────────────────────────
+function Screens() {
+  const screens = [
+    { id: 'landing', label: 'Landing',          dart: 'lib/main.dart',          Comp: window.VBScreenLanding },
+    { id: 'login',   label: 'Login',            dart: 'lib/login_screen.dart',  Comp: window.VBScreenLogin   },
+    { id: 'home',    label: 'Home Feed',        dart: 'lib/home_page.dart',     Comp: window.VBScreenHome    },
+    { id: 'search',  label: 'Search · Surface', dart: 'lib/search_field.dart',  Comp: window.VBScreenSearch  },
+    { id: 'detail',  label: 'Unit Details',     dart: 'lib/unit_details.dart',  Comp: window.VBScreenDetail  },
+    { id: 'profile', label: 'Profile',          dart: 'lib/profile_screen.dart',Comp: window.VBScreenProfile },
+  ];
+  return (
+    <div style={{ flex: 1, minHeight: 0, background: C.bg }}>
+      <DesignCanvas>
+        <DCSection id="vb-light" title="Variation B — Dusk Edit · Light mode">
+          {screens.map(s => (
+            <DCArtboard key={s.id} id={s.id} label={`${s.label}  ·  ${s.dart}`} width={375} height={780}>
+              <s.Comp />
+            </DCArtboard>
+          ))}
+        </DCSection>
+      </DesignCanvas>
+    </div>
+  );
+}
+
+// ── TOKENS ───────────────────────────────────────────────────────────────────
+function Tokens() {
+  const colorRows = [
+    { name: 'bg',          hex: '#F7F5F3', dart: 'VxrTokens.bg',         note: 'Page background — warm paper' },
+    { name: 'surface',     hex: '#FFFFFF', dart: 'VxrTokens.surface',    note: 'Cards, sheets, modals' },
+    { name: 'surface2',    hex: '#F2F0EE', dart: 'VxrTokens.surface2',   note: 'Inputs, chips, secondary fills' },
+    { name: 'border',      hex: '#EBEBEB', dart: 'VxrTokens.border',     note: 'Hairlines, card outlines' },
+    { name: 'text',        hex: '#1A1310', dart: 'VxrTokens.text',       note: 'Primary text · ink' },
+    { name: 'textSub',     hex: '#7A6E68', dart: 'VxrTokens.textSub',    note: 'Secondary text · captions' },
+    { name: 'textMuted',   hex: '#B0A8A2', dart: 'VxrTokens.textMuted',  note: 'Placeholder · inactive' },
+    { name: 'accent',      hex: '#FF7043', dart: 'VxrTokens.accent',     note: 'Primary actions · price · brand' },
+    { name: 'accentSoft',  hex: '#FDEAE4', dart: 'VxrTokens.accentSoft', note: 'Soft accent · icon tile bg · selected pill' },
+    { name: 'success',     hex: '#22C55E', dart: 'VxrTokens.success',    note: 'Approved · paid · resolved' },
+    { name: 'warning',     hex: '#FF9800', dart: 'VxrTokens.warning',    note: 'Pending · awaiting action' },
+    { name: 'danger',      hex: '#EF4444', dart: 'VxrTokens.danger',     note: 'Reject · destructive' },
+  ];
+  const radii = [
+    ['radiusSm',    8,  'Inputs interior, small chips'],
+    ['radiusPill',  50, 'Pills, search bar, chips'],
+    ['radius',      16, 'Cards, buttons (default)'],
+    ['radiusSheet', 28, 'Bottom sheets, modal tops'],
+  ];
+  const types = [
+    ['Display',  'Plus Jakarta Sans', 800, 28, 'Find Rental Homes'],
+    ['Title',    'Plus Jakarta Sans', 800, 17, 'Modern Studio Loft'],
+    ['Heading',  'Plus Jakarta Sans', 700, 13, 'Featured in Dasmariñas'],
+    ['Body',     'DM Sans',           400, 12, 'A beautifully furnished studio loft…'],
+    ['Caption',  'DM Sans',           500, 11, 'Verified Landlord · 12 listings'],
+    ['Micro',    'DM Sans',           600, 9,  'POPULAR'],
+  ];
+  return (
+    <div style={{ flex: 1, overflowY: 'auto', padding: '40px 56px' }}>
+      <div style={{ maxWidth: 1100, margin: '0 auto' }}>
+        <h2 style={{ fontFamily: C.fontHead, fontSize: 28, fontWeight: 800, color: C.text, marginBottom: 6 }}>Design tokens</h2>
+        <p style={{ fontSize: 13, color: C.textSub, marginBottom: 28 }}>Every value in <span style={{ fontFamily: C.fontMono, color: C.accent }}>VxrTokens</span> — these are what the Dart drop-ins reference.</p>
+
+        {/* Colors */}
+        <div style={{ fontFamily: C.fontHead, fontSize: 11, fontWeight: 700, color: C.textSub, letterSpacing: 2, marginBottom: 14 }}>COLORS</div>
+        <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 14, overflow: 'hidden', marginBottom: 32 }}>
+          {colorRows.map((c, i) => (
+            <div key={c.name} style={{
+              display: 'grid', gridTemplateColumns: '60px 1fr 130px 240px 1fr',
+              alignItems: 'center', padding: '12px 18px', gap: 16,
+              borderBottom: i < colorRows.length - 1 ? `1px solid ${C.border}` : 'none',
+            }}>
+              <div style={{
+                width: 44, height: 44, borderRadius: 9,
+                background: c.hex,
+                border: `1px solid ${C.border}`,
+                boxShadow: 'inset 0 0 0 1px rgba(0,0,0,0.05)',
+              }} />
+              <div style={{ fontFamily: C.fontMono, fontSize: 12, color: C.text, fontWeight: 500 }}>{c.name}</div>
+              <div style={{ fontFamily: C.fontMono, fontSize: 11, color: C.textSub }}>{c.hex}</div>
+              <div style={{ fontFamily: C.fontMono, fontSize: 11, color: C.accent }}>{c.dart}</div>
+              <div style={{ fontSize: 11, color: C.textSub }}>{c.note}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Brand gradient */}
+        <div style={{ fontFamily: C.fontHead, fontSize: 11, fontWeight: 700, color: C.textSub, letterSpacing: 2, marginBottom: 14 }}>BRAND GRADIENT</div>
+        <div style={{
+          background: C.surface, border: `1px solid ${C.border}`,
+          borderRadius: 14, padding: 18, marginBottom: 32,
+          display: 'flex', gap: 18, alignItems: 'center',
+        }}>
+          <div style={{
+            width: 200, height: 90, borderRadius: 12,
+            background: 'linear-gradient(135deg, #FF7043 0%, #FF5252 50%, #FF8A80 100%)',
+            boxShadow: '0 4px 24px rgba(255,112,67,0.35)',
+            flexShrink: 0,
+          }} />
+          <div style={{ flex: 1 }}>
+            <div style={{ fontFamily: C.fontMono, fontSize: 12, color: C.accent, marginBottom: 6 }}>VxrTokens.brandGradient</div>
+            <div style={{ fontSize: 11, color: C.textSub, lineHeight: 1.55 }}>
+              135° linear: <span style={{ fontFamily: C.fontMono, color: C.text }}>#FF7043 → #FF5252 → #FF8A80</span>.
+              Used on Home/Profile headers, primary buttons, active nav indicator, and gradient avatars.
+            </div>
+          </div>
+        </div>
+
+        {/* Radii */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, marginBottom: 32 }}>
+          <div>
+            <div style={{ fontFamily: C.fontHead, fontSize: 11, fontWeight: 700, color: C.textSub, letterSpacing: 2, marginBottom: 14 }}>RADII</div>
+            <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 14, overflow: 'hidden' }}>
+              {radii.map(([name, val, note], i) => (
+                <div key={name} style={{
+                  display: 'flex', alignItems: 'center', padding: '12px 16px', gap: 14,
+                  borderBottom: i < radii.length - 1 ? `1px solid ${C.border}` : 'none',
+                }}>
+                  <div style={{
+                    width: 40, height: 40,
+                    borderRadius: name === 'radiusPill' ? '50%' : Math.min(val, 20),
+                    background: C.accentSoft, border: `1px solid ${C.accent}33`, flexShrink: 0,
+                  }} />
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontFamily: C.fontMono, fontSize: 12, color: C.text }}>{name}</div>
+                    <div style={{ fontSize: 10, color: C.textSub, marginTop: 2 }}>{note}</div>
+                  </div>
+                  <div style={{ fontFamily: C.fontMono, fontSize: 11, color: C.accent }}>{val}px</div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div style={{ fontFamily: C.fontHead, fontSize: 11, fontWeight: 700, color: C.textSub, letterSpacing: 2, marginBottom: 14 }}>SHADOWS</div>
+            <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 14, padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+                <div style={{ width: 56, height: 56, borderRadius: 12, background: '#fff', boxShadow: '0 1px 6px rgba(0,0,0,0.08)', flexShrink: 0 }} />
+                <div>
+                  <div style={{ fontFamily: C.fontMono, fontSize: 12, color: C.text }}>shadowSm</div>
+                  <div style={{ fontSize: 10, color: C.textSub }}>Cards, list rows</div>
+                </div>
+              </div>
+              <div style={{ height: 1, background: C.border }} />
+              <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+                <div style={{ width: 56, height: 56, borderRadius: 12, background: 'linear-gradient(135deg, #FF7043, #FF8A80)', boxShadow: '0 4px 20px rgba(255,112,67,0.27)', flexShrink: 0 }} />
+                <div>
+                  <div style={{ fontFamily: C.fontMono, fontSize: 12, color: C.text }}>shadowCta</div>
+                  <div style={{ fontSize: 10, color: C.textSub }}>Primary buttons (gradient + glow)</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Type */}
+        <div style={{ fontFamily: C.fontHead, fontSize: 11, fontWeight: 700, color: C.textSub, letterSpacing: 2, marginBottom: 14 }}>TYPE SCALE</div>
+        <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 14, overflow: 'hidden', marginBottom: 32 }}>
+          {types.map(([name, family, weight, size, sample], i) => (
+            <div key={name} style={{
+              display: 'grid', gridTemplateColumns: '90px 200px 60px 60px 1fr',
+              alignItems: 'center', padding: '14px 18px', gap: 18,
+              borderBottom: i < types.length - 1 ? `1px solid ${C.border}` : 'none',
+            }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: C.textSub, letterSpacing: 0.5 }}>{name.toUpperCase()}</div>
+              <div style={{ fontFamily: C.fontMono, fontSize: 11, color: C.text }}>{family}</div>
+              <div style={{ fontFamily: C.fontMono, fontSize: 11, color: C.textSub }}>{weight}</div>
+              <div style={{ fontFamily: C.fontMono, fontSize: 11, color: C.accent }}>{size}px</div>
+              <div style={{ fontFamily: family.includes('Plus') ? C.fontHead : "'DM Sans'", fontWeight: weight, fontSize: size, color: C.text, lineHeight: 1.2 }}>{sample}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── DART DROP-IN ─────────────────────────────────────────────────────────────
+function DartView() {
+  const [file, setFile] = useState('vxr_theme.dart');
+  const [content, setContent] = useState('');
+  useEffect(() => {
+    fetch(`variation-b/dart/${file}`)
+      .then(r => r.text())
+      .then(setContent)
+      .catch(() => setContent('// Could not load file. Check variation-b/dart/' + file));
+  }, [file]);
+
+  const files = [
+    { name: 'vxr_theme.dart',   sub: 'tokens · ThemeData · VxrTheme inherited widget' },
+    { name: 'vxr_widgets.dart', sub: '9 reusable widgets — drop in lib/widgets/'      },
+  ];
+
+  return (
+    <div style={{ flex: 1, display: 'flex', minHeight: 0, background: C.bg }}>
+      {/* Sidebar */}
+      <div style={{
+        width: 280, flexShrink: 0,
+        background: C.surface, borderRight: `1px solid ${C.border}`,
+        padding: '20px 16px', display: 'flex', flexDirection: 'column', gap: 8, overflowY: 'auto',
+      }}>
+        <div style={{ fontFamily: C.fontHead, fontSize: 10, fontWeight: 700, color: C.textSub, letterSpacing: 2, marginBottom: 4, padding: '0 6px' }}>
+          DROP-IN FILES
+        </div>
+        {files.map(f => (
+          <div key={f.name} onClick={() => setFile(f.name)} style={{
+            padding: '10px 12px', borderRadius: 10, cursor: 'pointer',
+            background: file === f.name ? C.accentSoft : 'transparent',
+            border: `1px solid ${file === f.name ? C.accent + '33' : 'transparent'}`,
+          }}>
+            <div style={{
+              fontFamily: C.fontMono, fontSize: 12,
+              color: file === f.name ? C.accent : C.text, fontWeight: 600,
+              marginBottom: 3,
+            }}>{f.name}</div>
+            <div style={{ fontSize: 10, color: C.textSub, lineHeight: 1.4 }}>{f.sub}</div>
+          </div>
+        ))}
+
+        <div style={{ marginTop: 20, padding: 14, background: C.surface2, borderRadius: 12, border: `1px solid ${C.border}` }}>
+          <div style={{ fontFamily: C.fontHead, fontSize: 11, fontWeight: 700, color: C.text, marginBottom: 8 }}>How to install</div>
+          <ol style={{ paddingLeft: 16, fontSize: 11, color: C.textSub, lineHeight: 1.7 }}>
+            <li>Create <span style={{ fontFamily: C.fontMono, color: C.accent }}>lib/theme/</span></li>
+            <li>Drop both files into it</li>
+            <li>Add <span style={{ fontFamily: C.fontMono, color: C.accent }}>google_fonts</span> to pubspec (already there)</li>
+            <li>Wire <span style={{ fontFamily: C.fontMono, color: C.accent }}>VxrTheme</span> in <span style={{ fontFamily: C.fontMono, color: C.accent }}>main.dart</span></li>
+            <li>Use <span style={{ fontFamily: C.fontMono, color: C.accent }}>VxrPrimaryButton</span>, <span style={{ fontFamily: C.fontMono, color: C.accent }}>VxrPropertyCard</span>, etc.</li>
+          </ol>
+        </div>
+      </div>
+
+      {/* Code */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+        <div style={{
+          flexShrink: 0, padding: '12px 24px',
+          background: C.surface, borderBottom: `1px solid ${C.border}`,
+          display: 'flex', alignItems: 'center', gap: 12,
+        }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={C.accent} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6"/>
+          </svg>
+          <span style={{ fontFamily: C.fontMono, fontSize: 12, color: C.text }}>variation-b/dart/{file}</span>
+          <div style={{ marginLeft: 'auto', fontSize: 10, color: C.textMuted }}>
+            {content.split('\n').length} lines · {(content.length / 1024).toFixed(1)} KB
+          </div>
+        </div>
+        <pre style={{
+          flex: 1, overflow: 'auto', margin: 0,
+          padding: '20px 24px', fontFamily: C.fontMono,
+          fontSize: 12, lineHeight: 1.6, color: '#E8DDD4',
+          background: '#15100E', whiteSpace: 'pre',
+        }}>{content || '// Loading…'}</pre>
+      </div>
+    </div>
+  );
+}
+
+// ── PATCH GUIDE ──────────────────────────────────────────────────────────────
+function PatchView() {
+  const [activeFile, setActiveFile] = useState((window.PATCHES || [])[0]?.file);
+  const PATCHES = window.PATCHES || [];
+  const active = PATCHES.find(p => p.file === activeFile) || PATCHES[0];
+
+  return (
+    <div style={{ flex: 1, display: 'flex', minHeight: 0, background: C.bg }}>
+      {/* Sidebar */}
+      <div style={{
+        width: 320, flexShrink: 0,
+        background: C.surface, borderRight: `1px solid ${C.border}`,
+        display: 'flex', flexDirection: 'column',
+      }}>
+        <div style={{ padding: '18px 18px 12px', borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
+          <div style={{ fontFamily: C.fontHead, fontSize: 10, fontWeight: 700, color: C.textSub, letterSpacing: 2, marginBottom: 4 }}>
+            PATCH GUIDE
+          </div>
+          <div style={{ fontSize: 13, color: C.text, fontWeight: 600 }}>
+            {PATCHES.length} files · screen by screen
+          </div>
+        </div>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
+          {PATCHES.map(p => {
+            const skip = p.summary.startsWith('NO visual changes');
+            return (
+              <div key={p.file} onClick={() => setActiveFile(p.file)} style={{
+                padding: '10px 18px', cursor: 'pointer',
+                background: activeFile === p.file ? C.accentSoft : 'transparent',
+                borderLeft: `3px solid ${activeFile === p.file ? C.accent : 'transparent'}`,
+                opacity: skip ? 0.5 : 1,
+              }}>
+                <div style={{
+                  fontFamily: C.fontMono, fontSize: 11,
+                  color: activeFile === p.file ? C.accent : C.text,
+                  fontWeight: 600, marginBottom: 2,
+                }}>{p.file.replace('lib/', '')}</div>
+                <div style={{ fontSize: 10, color: C.textSub, lineHeight: 1.4 }}>{p.summary}</div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Patch detail */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '24px 32px', minWidth: 0 }}>
+        {active && (
+          <>
+            <div style={{ marginBottom: 24 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: C.textSub, letterSpacing: 1.5, marginBottom: 6 }}>
+                FLUTTER FILE
+              </div>
+              <h2 style={{ fontFamily: C.fontMono, fontSize: 20, fontWeight: 700, color: C.text, marginBottom: 10 }}>
+                {active.file}
+              </h2>
+              <div style={{
+                padding: '10px 14px', background: C.accentSoft,
+                border: `1px solid ${C.accent}33`, borderRadius: 10,
+                fontSize: 12, color: C.text, lineHeight: 1.5,
+              }}>{active.summary}</div>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+              {active.changes.map((change, i) => (
+                <div key={i} style={{
+                  background: C.surface, border: `1px solid ${C.border}`,
+                  borderRadius: 14, overflow: 'hidden',
+                }}>
+                  <div style={{
+                    padding: '12px 16px',
+                    background: C.surface2,
+                    borderBottom: `1px solid ${C.border}`,
+                    display: 'flex', alignItems: 'center', gap: 10,
+                  }}>
+                    <div style={{
+                      width: 22, height: 22, borderRadius: 50, background: C.grad,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      color: 'white', fontSize: 10, fontWeight: 800, flexShrink: 0,
+                    }}>{i + 1}</div>
+                    <div style={{ fontFamily: C.fontHead, fontSize: 13, fontWeight: 700, color: C.text }}>
+                      {change.label}
+                    </div>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
+                    <CodePane label="BEFORE" tone="before" code={change.before || '// (nothing — new code)'} />
+                    <CodePane label="AFTER · Variation B" tone="after" code={change.after} />
+                  </div>
+                  {change.note && (
+                    <div style={{
+                      padding: '10px 16px',
+                      borderTop: `1px solid ${C.border}`,
+                      background: C.surface,
+                      display: 'flex', gap: 10, alignItems: 'flex-start',
+                    }}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={C.accent} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: 2 }}>
+                        <circle cx="12" cy="12" r="10"/><path d="M12 16v-4 M12 8h.01"/>
+                      </svg>
+                      <div style={{ fontSize: 11.5, color: C.textSub, lineHeight: 1.55 }}>{change.note}</div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CodePane({ label, tone, code }) {
+  const isBefore = tone === 'before';
+  return (
+    <div style={{
+      borderRight: isBefore ? `1px solid ${C.border}` : 'none',
+      display: 'flex', flexDirection: 'column', minWidth: 0,
+    }}>
+      <div style={{
+        padding: '8px 14px',
+        background: isBefore ? 'rgba(239, 68, 68, 0.08)' : 'rgba(34, 197, 94, 0.08)',
+        borderBottom: `1px solid ${C.border}`,
+        fontSize: 10, fontWeight: 700, letterSpacing: 1.2,
+        color: isBefore ? '#fca5a5' : '#86efac',
+      }}>{label}</div>
+      <pre style={{
+        margin: 0, padding: '14px 16px',
+        fontFamily: C.fontMono, fontSize: 11.5, lineHeight: 1.55,
+        color: '#E8DDD4', background: isBefore ? '#191210' : '#121512',
+        overflowX: 'auto', flex: 1,
+        whiteSpace: 'pre', minWidth: 0,
+      }}>{code}</pre>
+    </div>
+  );
+}
+
+// ── APP ──────────────────────────────────────────────────────────────────────
+function App() {
+  const [tab, setTab] = useState('overview');
+  return (
+    <div data-screen-label="00 Variation B" style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', background: C.bg }}>
+      <TopBar tab={tab} onTab={setTab} />
+      {tab === 'overview' && <Overview onTab={setTab} />}
+      {tab === 'screens'  && <Screens />}
+      {tab === 'tokens'   && <Tokens />}
+      {tab === 'dart'     && <DartView />}
+      {tab === 'patches'  && <PatchView />}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

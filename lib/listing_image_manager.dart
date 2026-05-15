@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'theme/vxr_theme.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'property_data.dart';
@@ -86,11 +87,11 @@ class _ListingImageManagerScreenState extends State<ListingImageManagerScreen> {
     if (widget.listingId != null) {
       final records = await fetchListingImageRecords(widget.listingId!);
       for (final rec in records) {
-        if ((rec['image_type'] ?? 'normal') != 'normal') continue;
+        if ((rec['type'] ?? 'normal') != 'normal') continue;
         _images.add(ListingImageItem(
           id: rec['id'],
-          url: buildStorageUrl(rec['image_url'] ?? ''),
-          imageType: rec['image_type'] ?? 'normal',
+          url: buildStorageUrl(rec['url'] ?? ''),
+          imageType: rec['type'] ?? 'normal',
           uploadSource: rec['upload_source'] ?? 'upload',
           sortOrder: rec['sort_order'] ?? 0,
           isCover: rec['is_cover'] ?? false,
@@ -171,13 +172,13 @@ class _ListingImageManagerScreenState extends State<ListingImageManagerScreen> {
             ),
             const SizedBox(height: 8),
             ListTile(
-              leading: const Icon(Icons.photo_library, color: Color(0xfff36c6c)),
+              leading: const Icon(Icons.photo_library, color: VxrTokens.accent),
               title: const Text('Choose from Gallery'),
               subtitle: const Text('Select multiple photos'),
               onTap: () => Navigator.pop(ctx, 'gallery'),
             ),
             ListTile(
-              leading: const Icon(Icons.camera_alt, color: Color(0xfff36c6c)),
+              leading: const Icon(Icons.camera_alt, color: VxrTokens.accent),
               title: const Text('Take a Photo'),
               subtitle: const Text('Use your camera'),
               onTap: () => Navigator.pop(ctx, 'camera'),
@@ -258,7 +259,7 @@ class _ListingImageManagerScreenState extends State<ListingImageManagerScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text('Set as cover photo'),
-        backgroundColor: Color(0xfff36c6c),
+        backgroundColor: VxrTokens.accent,
         duration: Duration(seconds: 1),
       ),
     );
@@ -307,26 +308,52 @@ class _ListingImageManagerScreenState extends State<ListingImageManagerScreen> {
 
         final rows = storagePaths.asMap().entries.map((e) => {
           'listing_id': widget.listingId,
-          'image_url': e.value,
-          'image_type': 'normal',
+          'url': e.value,
+          'type': 'normal',
           'upload_source': sources[e.key],
           'sort_order': existingCount + e.key,
           'is_cover': false,
           'uploaded_by': userId,
         }).toList();
 
-        await Supabase.instance.client.from('listing_images').insert(rows);
+        await Supabase.instance.client.from('listing_image').insert(rows);
       }
 
-      // Update cover photo if changed
+      // Update cover photo if changed.
+      // Build a map from the index in pendingImages → uploaded storagePath
+      // so we can resolve the correct URL for newly-uploaded cover items.
+      final uploadedPathByPendingIndex = <int, String>{};
+      for (int i = 0; i < pendingImages.length; i++) {
+        if (i < storagePaths.length) {
+          uploadedPathByPendingIndex[i] = storagePaths[i];
+        }
+      }
+
       final coverItem = _images.firstWhere(
         (img) => img.isCover,
         orElse: () => _images.first,
       );
+
+      String? coverUrlToSave;
       if (coverItem.isRemote && coverItem.url != null) {
+        // Already-uploaded image — use its public URL as the raw path or full URL.
+        // The DB stores the storage path; extract it from the full URL if needed.
+        coverUrlToSave = coverItem.url;
+      } else if (coverItem.isLocal) {
+        // Newly uploaded — find the storage path we just saved.
+        final idx = pendingImages.indexOf(coverItem);
+        if (idx >= 0 && idx < storagePaths.length) {
+          coverUrlToSave = storagePaths[idx];
+        } else if (storagePaths.isNotEmpty) {
+          // Fallback: use the first newly-uploaded path.
+          coverUrlToSave = storagePaths.first;
+        }
+      }
+
+      if (coverUrlToSave != null) {
         await Supabase.instance.client
             .from('listings')
-            .update({'cover_photo_url': coverItem.url})
+            .update({'cover_photo_url': coverUrlToSave})
             .eq('id', widget.listingId!);
       }
 
@@ -334,7 +361,7 @@ class _ListingImageManagerScreenState extends State<ListingImageManagerScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Images saved successfully'),
-            backgroundColor: Color(0xfff36c6c),
+            backgroundColor: VxrTokens.accent,
           ),
         );
         Navigator.pop(context, _images);
@@ -356,13 +383,10 @@ class _ListingImageManagerScreenState extends State<ListingImageManagerScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xfff5f5f5),
+      backgroundColor: VxrTokens.bg,
       appBar: AppBar(
-        backgroundColor: const Color(0xfff36c6c),
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () => Navigator.pop(context),
+        flexibleSpace: const DecoratedBox(
+          decoration: BoxDecoration(gradient: VxrTokens.brandGradient),
         ),
         title: const Text(
           'Manage Photos',
@@ -395,7 +419,7 @@ class _ListingImageManagerScreenState extends State<ListingImageManagerScreen> {
       ),
       body: _loading
           ? const Center(
-              child: CircularProgressIndicator(color: Color(0xfff36c6c)),
+              child: CircularProgressIndicator(color: VxrTokens.accent),
             )
           : Column(
               children: [
@@ -429,7 +453,7 @@ class _ListingImageManagerScreenState extends State<ListingImageManagerScreen> {
       floatingActionButton: !_loading
           ? FloatingActionButton(
               onPressed: _showAddImageSheet,
-              backgroundColor: const Color(0xfff36c6c),
+              backgroundColor: VxrTokens.accent,
               child: const Icon(Icons.add_a_photo, color: Colors.white),
             )
           : null,
@@ -442,29 +466,37 @@ class _ListingImageManagerScreenState extends State<ListingImageManagerScreen> {
         height: 300,
         margin: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(15),
-          border: Border.all(color: Colors.grey[300]!, style: BorderStyle.solid),
+          color: VxrTokens.surface2,
+          borderRadius: BorderRadius.circular(VxrTokens.radius),
+          border: Border.all(color: VxrTokens.border, width: 1.5),
         ),
         child: Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.add_photo_alternate_outlined,
-                  size: 60, color: Colors.grey[400]),
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: VxrTokens.accentSoft,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(Icons.add_photo_alternate_outlined,
+                    color: VxrTokens.accent, size: 22),
+              ),
               const SizedBox(height: 12),
-              Text(
+              const Text(
                 'No photos yet',
                 style: TextStyle(
-                  fontSize: 16,
-                  color: Colors.grey[500],
-                  fontWeight: FontWeight.w500,
+                  fontSize: 14,
+                  color: VxrTokens.textSub,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
               const SizedBox(height: 4),
-              Text(
+              const Text(
                 'Tap + to add photos',
-                style: TextStyle(fontSize: 13, color: Colors.grey[400]),
+                style: TextStyle(fontSize: 12, color: VxrTokens.textMuted),
               ),
             ],
           ),
@@ -502,7 +534,7 @@ class _ListingImageManagerScreenState extends State<ListingImageManagerScreen> {
                 padding:
                     const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                 decoration: BoxDecoration(
-                  color: const Color(0xfff36c6c),
+                  color: VxrTokens.accent,
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: const Row(
@@ -567,7 +599,7 @@ class _ListingImageManagerScreenState extends State<ListingImageManagerScreen> {
                     height: 6,
                     decoration: BoxDecoration(
                       color: _currentPage == index
-                          ? const Color(0xfff36c6c)
+                          ? VxrTokens.accent
                           : Colors.white54,
                       borderRadius: BorderRadius.circular(3),
                     ),
@@ -607,7 +639,7 @@ class _ListingImageManagerScreenState extends State<ListingImageManagerScreen> {
                 borderRadius: BorderRadius.circular(10),
                 border: Border.all(
                   color: isSelected
-                      ? const Color(0xfff36c6c)
+                      ? VxrTokens.accent
                       : Colors.grey[300]!,
                   width: isSelected ? 2.5 : 1,
                 ),
@@ -625,7 +657,7 @@ class _ListingImageManagerScreenState extends State<ListingImageManagerScreen> {
                         child: Container(
                           padding: const EdgeInsets.all(2),
                           decoration: const BoxDecoration(
-                            color: Color(0xfff36c6c),
+                            color: VxrTokens.accent,
                             shape: BoxShape.circle,
                           ),
                           child: const Icon(Icons.star,
@@ -655,8 +687,8 @@ class _ListingImageManagerScreenState extends State<ListingImageManagerScreen> {
               icon: const Icon(Icons.star_outline, size: 18),
               label: const Text('Set as Cover'),
               style: OutlinedButton.styleFrom(
-                foregroundColor: const Color(0xfff36c6c),
-                side: const BorderSide(color: Color(0xfff36c6c)),
+                foregroundColor: VxrTokens.accent,
+                side: const BorderSide(color: VxrTokens.accent),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),
@@ -706,7 +738,7 @@ class _ListingImageManagerScreenState extends State<ListingImageManagerScreen> {
             ),
             ListTile(
               leading:
-                  const Icon(Icons.fullscreen, color: Color(0xfff36c6c)),
+                  const Icon(Icons.fullscreen, color: VxrTokens.accent),
               title: const Text('View Full Screen'),
               onTap: () {
                 Navigator.pop(ctx);
@@ -716,7 +748,7 @@ class _ListingImageManagerScreenState extends State<ListingImageManagerScreen> {
             if (!_images[index].isCover)
               ListTile(
                 leading:
-                    const Icon(Icons.star_outline, color: Color(0xfff36c6c)),
+                    const Icon(Icons.star_outline, color: VxrTokens.accent),
                 title: const Text('Set as Cover Photo'),
                 onTap: () {
                   Navigator.pop(ctx);
@@ -773,7 +805,7 @@ class _ListingImageManagerScreenState extends State<ListingImageManagerScreen> {
             child: const Center(
               child: CircularProgressIndicator(
                 strokeWidth: 2,
-                color: Color(0xfff36c6c),
+                color: VxrTokens.accent,
               ),
             ),
           );

@@ -1,0 +1,82 @@
+---
+config:
+  theme: neutral
+  flowchart:
+    curve: basis
+    nodeSpacing: 30
+    rankSpacing: 55
+---
+flowchart TB
+  classDef ent fill:#FFE0B2,stroke:#C45A14,color:#2A1606,stroke-width:1.5px,font-weight:bold
+  classDef proc fill:#D9ECFF,stroke:#1E5BBA,color:#0F2A52,stroke-width:1.2px,font-weight:bold
+  classDef store fill:#FFF8DC,stroke:#8C6A0E,color:#3B2C00,stroke-width:1.2px
+
+  T((Tenant))
+  L((Landlord))
+  A((Administrator))
+  STRIPE[Stripe API]
+
+  P1(("1.0<br/>Auth and<br/>Verification"))
+  P2(("2.0<br/>Listing<br/>Management"))
+  P3(("3.0<br/>Application<br/>Management"))
+  P4(("4.0<br/>Contract<br/>Management"))
+  P5(("5.0<br/>Payment<br/>Processing"))
+  P6(("6.0<br/>Real-time<br/>Messaging"))
+  P7(("7.0<br/>Report<br/>Management"))
+  P8(("8.0<br/>Administration"))
+
+  D1[(D1 profiles)]
+  D2[(D2 listings)]
+  D2b[(D2b listing_image)]
+  D3[(D3 application)]
+  D4[(D4 contract)]
+  D5[(D5 payment)]
+  D6[(D6 conversation and message)]
+  D7[(D7 report)]
+  D8[(D8 bookmark)]
+  D9[(D9 cms_*)]
+
+  class T,L,A,STRIPE ent
+  class P1,P2,P3,P4,P5,P6,P7,P8 proc
+  class D1,D2,D2b,D3,D4,D5,D6,D7,D8,D9 store
+
+  T -->|credentials, ID upload| P1
+  L -->|credentials, ID upload| P1
+  A -->|credentials| P1
+  P1 <--> D1
+
+  L -->|new or edited listing| P2
+  T -->|browse, search| P2
+  T -->|bookmark| P2
+  P2 <--> D2
+  P2 <--> D2b
+  P2 <--> D8
+
+  T -->|application form| P3
+  L -->|approve or reject| P3
+  P3 <--> D3
+  P3 -->|on approval| P4
+
+  L -->|contract terms| P4
+  T -->|tenant signature| P4
+  L -->|landlord signature| P4
+  P4 <--> D4
+
+  P4 -->|fully signed| P5
+  T -->|payment confirm| P5
+  P5 <-->|PaymentIntent| STRIPE
+  P5 --> D5
+
+  T -->|send message| P6
+  L -->|send message| P6
+  P6 <--> D6
+
+  T -->|file report| P7
+  L -->|respond, resolve| P7
+  P7 <--> D7
+
+  A --> P8
+  P8 <--> D1
+  P8 <--> D2
+  P8 <--> D4
+  P8 <--> D9

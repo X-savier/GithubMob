@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'theme/vxr_theme.dart';
+import 'theme/vxr_widgets.dart';
 
 class FilterWidget extends StatefulWidget {
   final Function(Map<String, dynamic>) onApplyFilters;
@@ -42,8 +44,9 @@ class _FilterWidgetState extends State<FilterWidget> {
       builder: (context, scrollController) {
         return Container(
           decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(25)),
+            color: VxrTokens.surface,
+            borderRadius:
+                BorderRadius.vertical(top: Radius.circular(VxrTokens.radiusSheet)),
           ),
           child: Column(
             children: [
@@ -53,7 +56,7 @@ class _FilterWidgetState extends State<FilterWidget> {
                 width: 40,
                 height: 4,
                 decoration: BoxDecoration(
-                  color: Colors.grey[300],
+                  color: VxrTokens.border,
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
@@ -88,7 +91,7 @@ class _FilterWidgetState extends State<FilterWidget> {
                       child: const Text(
                         'Reset All',
                         style: TextStyle(
-                          color: Color(0xfff36c6c),
+                          color: VxrTokens.accent,
                           fontWeight: FontWeight.w500,
                         ),
                       ),
@@ -149,39 +152,54 @@ class _FilterWidgetState extends State<FilterWidget> {
                 ),
               ),
 
-              // Apply Button
-              Padding(
-                padding: const EdgeInsets.all(20),
-                child: ElevatedButton(
-                  onPressed: () {
-                    final filters = {
-                      'sortBy': selectedSortBy,
-                      'propertyType': selectedPropertyType,
-                      'bedrooms': bedrooms,
-                      'bathrooms': bathrooms,
-                      'minArea': minArea,
-                      'maxArea': maxArea,
-                      'furnishing': selectedFurnishing,
-                      'petPolicy': selectedPetPolicy,
-                      'smokingPolicy': selectedSmokingPolicy,
-                    };
-                    widget.onApplyFilters(filters);
-                    Navigator.pop(context);
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xfff36c6c),
-                    foregroundColor: Colors.white,
-                    minimumSize: const Size(double.infinity, 50),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(25),
-                    ),
-                  ),
-                  child: const Text(
-                    'Apply Filters',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
+              // Reset / Apply CTAs
+              SafeArea(
+                top: false,
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: VxrSecondaryButton(
+                          label: 'Reset',
+                          onPressed: () {
+                            setState(() {
+                              selectedSortBy = 'Any';
+                              selectedPropertyType = 'Any';
+                              selectedFurnishing = 'Any';
+                              selectedPetPolicy = 'Any';
+                              selectedSmokingPolicy = 'Any';
+                              bedrooms = 0;
+                              bathrooms = 0;
+                              minArea = 0;
+                              maxArea = 200;
+                            });
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        flex: 2,
+                        child: VxrPrimaryButton(
+                          label: 'Apply Filters',
+                          onPressed: () {
+                            final filters = {
+                              'sortBy': selectedSortBy,
+                              'propertyType': selectedPropertyType,
+                              'bedrooms': bedrooms,
+                              'bathrooms': bathrooms,
+                              'minArea': minArea,
+                              'maxArea': maxArea,
+                              'furnishing': selectedFurnishing,
+                              'petPolicy': selectedPetPolicy,
+                              'smokingPolicy': selectedSmokingPolicy,
+                            };
+                            widget.onApplyFilters(filters);
+                            Navigator.pop(context);
+                          },
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),

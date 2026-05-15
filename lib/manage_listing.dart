@@ -1,29 +1,39 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'theme/vxr_theme.dart';
+import 'theme/vxr_widgets.dart';
+import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:printing/printing.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'contract_templates.dart';
 import 'property_data.dart';
 import 'listing_image_manager.dart';
 import 'panorama_manager.dart';
+import 'psgc_location_field.dart';
+import 'verification_screen.dart';
 
 const String _mapsApiKey = 'AIzaSyAyclCsU4xb9g0i2jCEPkaM4D5bACDwXbo';
 
 // ─────────────────────────────────────────────
 // CONSTANTS
 // ─────────────────────────────────────────────
-const kCoral = Color(0xFFE8735A);
+const kCoral = VxrTokens.accent;
 const kRedSelected = Color(0xFFC0392B);
-const kPageBg = Color(0xFFF0F2F5);
-const kBorderColor = Color(0xFFDEDEDE);
-const kHintColor = Color(0xFFAAAAAA);
-const kLabelColor = Color(0xFF333333);
-const kSectionTitle = Color(0xFF1A1A1A);
+const kPageBg = VxrTokens.bg;
+const kBorderColor = VxrTokens.border;
+const kHintColor = VxrTokens.textMuted;
+const kLabelColor = VxrTokens.textSub;
+const kSectionTitle = VxrTokens.text;
+const _listingLoadTimeout = Duration(seconds: 15);
 
 // ─────────────────────────────────────────────
 // LISTING DATA MODEL
@@ -81,30 +91,119 @@ class ManageListingScreen extends StatefulWidget {
 class _ManageListingScreenState extends State<ManageListingScreen> {
   List<ListingData> _listings = [];
   bool _isLoading = true;
+  bool _hasRenderedShell = false;
+  String? _loadError;
 
   @override
   void initState() {
     super.initState();
-    _loadListings();
+    // ignore: avoid_print
+    print('ManageListingScreen initState');
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      // ignore: avoid_print
+      print('ManageListingScreen first frame rendered');
+      if (!mounted) return;
+      setState(() => _hasRenderedShell = true);
+      // Kick the load on the very next frame so the shell paints first
+      // but we do not introduce a fake delay that could hide a hang.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        // ignore: avoid_print
+        print('ManageListingScreen load kickoff');
+        if (mounted) _loadListings();
+      });
+    });
   }
 
   Future<void> _loadListings() async {
-    setState(() => _isLoading = true);
-    final properties = await fetchLandlordListings();
+    // ignore: avoid_print
+    print('ManageListingScreen _loadListings ENTER');
     if (mounted) {
       setState(() {
-        _listings = properties.map((p) => ListingData.fromProperty(p)).toList();
+        _isLoading = true;
+        _loadError = null;
+      });
+    }
+
+    final startedAt = DateTime.now();
+    // ignore: avoid_print
+    print('ManageListingScreen load listings started');
+    try {
+      // ignore: avoid_print
+      print('ManageListingScreen awaiting fetchLandlordListings');
+      final properties = await fetchLandlordListings(throwOnError: true).timeout(
+        _listingLoadTimeout,
+        onTimeout: () => throw TimeoutException(
+          'Loading listings took longer than ${_listingLoadTimeout.inSeconds} seconds.',
+        ),
+      );
+      // ignore: avoid_print
+      print(
+        'ManageListingScreen fetchLandlordListings returned ${properties.length}',
+      );
+      final listings = properties
+          .map((property) => ListingData.fromProperty(property))
+          .toList();
+      // ignore: avoid_print
+      print(
+        'ManageListingScreen loaded ${listings.length} listings in '
+        '${DateTime.now().difference(startedAt).inMilliseconds}ms',
+      );
+      if (!mounted) return;
+      setState(() {
+        _listings = listings;
         _isLoading = false;
+      });
+    } on TimeoutException catch (e) {
+      // ignore: avoid_print
+      print('ManageListingScreen load listings timeout: $e');
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _loadError =
+            'Loading your listings is taking too long. Check your connection and try again.';
+      });
+    } catch (e, st) {
+      // ignore: avoid_print
+      print('ManageListingScreen load listings ERROR: $e');
+      // ignore: avoid_print
+      print('ManageListingScreen load listings STACK: $st');
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _loadError =
+            'Could not load your listings right now. Please try again.';
       });
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    // ignore: avoid_print
+    print(
+      'ManageListingScreen build start shell=$_hasRenderedShell loading=$_isLoading',
+    );
+
+    if (!_hasRenderedShell) {
+      // ignore: avoid_print
+      print('ManageListingScreen build end shell');
+      return Scaffold(
+        backgroundColor: kPageBg,
+        body: SafeArea(child: _buildOpeningState()),
+      );
+    }
+
+    final scaffold = Scaffold(
       backgroundColor: kPageBg,
       appBar: AppBar(
-        backgroundColor: kCoral,
+        systemOverlayStyle: const SystemUiOverlayStyle(
+          statusBarColor: Colors.transparent,
+          statusBarIconBrightness: Brightness.light,
+          statusBarBrightness: Brightness.dark,
+        ),
+        backgroundColor: Colors.transparent,
+        flexibleSpace: const DecoratedBox(
+          decoration: BoxDecoration(gradient: VxrTokens.brandGradient),
+        ),
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.white),
@@ -145,6 +244,11 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
                       horizontal: 16,
                       vertical: 10,
                     ),
+                    // Override the global ElevatedButtonTheme which forces
+                    // a full-width minimum size; that breaks layout when
+                    // the button is placed inside a Row.
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(8),
                     ),
@@ -154,29 +258,115 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
               ],
             ),
             const SizedBox(height: 16),
-            Expanded(
-              child: _isLoading
-                  ? const Center(
-                      child: CircularProgressIndicator(color: kCoral),
-                    )
-                  : _listings.isEmpty
-                      ? _buildEmptyState()
-                      : RefreshIndicator(
-                          onRefresh: _loadListings,
-                          color: kCoral,
-                          child: ListView.separated(
-                            itemCount: _listings.length,
-                            separatorBuilder: (_, _) => const SizedBox(height: 16),
-                            itemBuilder: (context, index) =>
-                                _buildListingCard(_listings[index], index),
-                          ),
-                        ),
-            ),
+            Expanded(child: _buildListingsBody()),
           ],
         ),
       ),
     );
+
+    // ignore: avoid_print
+    print('ManageListingScreen build end');
+    return scaffold;
   }
+
+  Widget _buildListingsBody() {
+    if (_isLoading) {
+      return _buildLoadingState();
+    }
+    if (_loadError != null) return _buildErrorState(_loadError!);
+    if (_listings.isEmpty) return _buildEmptyState();
+    return RefreshIndicator(
+      onRefresh: _loadListings,
+      color: kCoral,
+      child: ListView.separated(
+        itemCount: _listings.length,
+        separatorBuilder: (_, _) => const SizedBox(height: 16),
+        itemBuilder: (context, index) =>
+            _buildListingCard(_listings[index], index),
+      ),
+    );
+  }
+
+  Widget _buildOpeningState() => Center(
+    child: Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(Icons.list_alt_outlined, size: 56, color: Colors.grey.shade300),
+        const SizedBox(height: 16),
+        Text(
+          'Opening listings...',
+          style: TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w600,
+            color: Colors.grey.shade500,
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Widget _buildLoadingState() => Center(
+    child: Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(Icons.home_work_outlined, size: 56, color: Colors.grey.shade300),
+        const SizedBox(height: 16),
+        Text(
+          'Loading your listings...',
+          style: TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w600,
+            color: Colors.grey.shade500,
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Widget _buildErrorState(String message) => Center(
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.wifi_off_rounded, size: 56, color: Colors.grey.shade300),
+          const SizedBox(height: 16),
+          Text(
+            'Listings unavailable',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+              color: Colors.grey.shade500,
+            ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            message,
+            style: TextStyle(fontSize: 13, color: Colors.grey.shade500),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 20),
+          ElevatedButton.icon(
+            onPressed: _loadListings,
+            icon: const Icon(Icons.refresh_rounded, size: 18),
+            label: const Text('Retry'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: kCoral,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 11),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+              elevation: 0,
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
 
   Widget _buildEmptyState() => Center(
     child: Column(
@@ -204,15 +394,10 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
 
   Widget _buildListingCard(ListingData listing, int index) => Container(
     decoration: BoxDecoration(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(12),
-      boxShadow: [
-        BoxShadow(
-          color: Colors.black.withOpacity(0.06),
-          blurRadius: 8,
-          offset: const Offset(0, 2),
-        ),
-      ],
+      color: VxrTokens.surface,
+      borderRadius: BorderRadius.circular(VxrTokens.radius),
+      border: Border.all(color: VxrTokens.border),
+      boxShadow: VxrTokens.shadowSm,
     ),
     clipBehavior: Clip.antiAlias,
     child: Column(
@@ -326,7 +511,7 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
         color: Colors.white,
         borderRadius: BorderRadius.circular(6),
         boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.12), blurRadius: 4),
+          BoxShadow(color: Colors.black.withValues(alpha: 0.12), blurRadius: 4),
         ],
       ),
       child: Row(
@@ -400,7 +585,8 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
     final result = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
-        builder: (_) => CreateListingScreen(existingListingId: _listings[index].id),
+        builder: (_) =>
+            CreateListingScreen(existingListingId: _listings[index].id),
       ),
     );
     if (result == true) _loadListings();
@@ -443,19 +629,19 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
   }
 
   Widget _cardImagePlaceholder() => Container(
-      height: 180,
-      width: double.infinity,
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFFCFD8DC), Color(0xFFB0BEC5)],
-        ),
+    height: 180,
+    width: double.infinity,
+    decoration: const BoxDecoration(
+      gradient: LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [Color(0xFFCFD8DC), Color(0xFFB0BEC5)],
       ),
-      child: const Center(
-        child: Icon(Icons.home_work_outlined, size: 48, color: Colors.white54),
-      ),
-    );
+    ),
+    child: const Center(
+      child: Icon(Icons.home_work_outlined, size: 48, color: Colors.white54),
+    ),
+  );
 
   Widget _statChip(String label, IconData icon) => Row(
     mainAxisSize: MainAxisSize.min,
@@ -474,6 +660,8 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
   );
 
   Future<void> _goToCreateListing() async {
+    final canCreate = await ensureVerifiedToCreateListing(context);
+    if (!canCreate || !mounted) return;
     final result = await Navigator.push<bool>(
       context,
       MaterialPageRoute(builder: (_) => const CreateListingScreen()),
@@ -559,10 +747,31 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
       _modificationAllowed = false;
   String _guestPolicy = 'Day/Nite Only', _responseTime = 'Within 1 Hour';
 
+  // ── Contract template state ──
+  // Either a freshly-picked file (not yet uploaded) or a previously
+  // saved file referenced by storage path + display name. The two
+  // states are mutually exclusive: selecting a new file clears the
+  // remote reference and vice versa.
+  PlatformFile? _contractTemplateFile;
+  String? _contractTemplateUrl; // storage path saved on the listing
+  String? _contractTemplateName; // original filename for display
+
+  // Landlord-edited terms. `null` means "use the per-type defaults"
+  // from contract_templates.dart at contract-signing time.
+  List<String>? _termsOverride;
+
   final ImagePicker _picker = ImagePicker();
   List<XFile> _propertyImages = [];
   List<RoomPanoramaItem> _media360Rooms = [];
   XFile? _coverPhoto;
+
+  // ── Listing verification ──
+  // Proof-of-ownership document (required for new listings).
+  // [_verificationDoc] is a freshly-picked file; [_verificationDocUrl]
+  // is the saved storage path on existing listings.
+  XFile? _verificationDoc;
+  String? _verificationDocUrl;
+  bool _listingVerified = false;
 
   // Map state
   GoogleMapController? _mapController;
@@ -593,14 +802,33 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
         _fullAddressCtrl.text = data['full_address']?.toString() ?? '';
         _postalCodeCtrl.text = data['postal_code']?.toString() ?? '';
         _streetAreaCtrl.text = data['barangay']?.toString() ?? '';
+        _verificationDocUrl = data['verification_doc_url']?.toString();
+        _listingVerified = data['is_verified'] == true;
+        final lat = (data['latitude'] as num?)?.toDouble();
+        final lng = (data['longitude'] as num?)?.toDouble();
+        if (lat != null && lng != null && (lat != 0 || lng != 0)) {
+          _mapPosition = LatLng(lat, lng);
+          _mapZoom = 16;
+          _mapMarkers = {
+            Marker(
+              markerId: const MarkerId('selected'),
+              position: _mapPosition,
+              infoWindow: InfoWindow(
+                title: data['full_address']?.toString() ?? 'Selected Location',
+              ),
+            ),
+          };
+        }
         _bedrooms = data['bedrooms']?.toString();
         _bathrooms = data['bathrooms']?.toString();
         _maxOccupantsCtrl.text = data['max_occupants']?.toString() ?? '';
         _squareMeterCtrl.text = data['square_meters']?.toString() ?? '';
         _furnishing = data['furnishing']?.toString();
         _monthlyRentCtrl.text = data['monthly_rent']?.toString() ?? '0.00';
-        _securityDepositCtrl.text = data['security_deposit']?.toString() ?? '0.00';
-        _advancePaymentCtrl.text = data['advance_payment']?.toString() ?? '0.00';
+        _securityDepositCtrl.text =
+            data['security_deposit']?.toString() ?? '0.00';
+        _advancePaymentCtrl.text =
+            data['advance_payment']?.toString() ?? '0.00';
         _paymentTerms = data['payment_terms']?.toString();
         _paymentMethod = data['payment_method']?.toString();
         _isImmediate = data['is_immediate'] == true;
@@ -642,6 +870,31 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
         _hasLaundryArea = data['has_laundry_area'] == true;
         _hasFunctionHall = data['has_function_hall'] == true;
         _hasPlayground = data['has_playground'] == true;
+        // Contract template + landlord-customized terms.
+        // Columns are nullable and may be missing on older listings —
+        // treat all of these as best-effort.
+        _contractTemplateUrl = data['contract_template_url']?.toString();
+        _contractTemplateName = data['contract_template_name']?.toString();
+        final rawTerms = data['terms_override'];
+        if (rawTerms is List) {
+          _termsOverride = rawTerms
+              .map((e) => e?.toString() ?? '')
+              .where((s) => s.isNotEmpty)
+              .toList();
+        } else if (rawTerms is String && rawTerms.isNotEmpty) {
+          // Some Postgres clients return JSONB as a JSON-encoded string.
+          try {
+            final decoded = jsonDecode(rawTerms);
+            if (decoded is List) {
+              _termsOverride = decoded
+                  .map((e) => e?.toString() ?? '')
+                  .where((s) => s.isNotEmpty)
+                  .toList();
+            }
+          } catch (_) {
+            /* leave as null */
+          }
+        }
       });
     }
   }
@@ -674,7 +927,9 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
     return Scaffold(
       backgroundColor: kPageBg,
       appBar: AppBar(
-        backgroundColor: kCoral,
+        flexibleSpace: const DecoratedBox(
+          decoration: BoxDecoration(gradient: VxrTokens.brandGradient),
+        ),
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.white, size: 22),
@@ -730,6 +985,7 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
               ),
             ),
             const SizedBox(height: 16),
+            _buildListingTypeSelector(),
             _buildListingTitleSection(),
             _buildLocationDetailsSection(),
             _buildPropertyDetailsSection(),
@@ -740,8 +996,11 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
             _buildUtilitiesSection(),
             _buildBuildingFeaturesSection(),
             _buildRulesAndPoliciesSection(),
+            _buildTermsAndConditionsSection(),
+            _buildContractTemplateSection(),
             _buildHostInformationSection(),
             _buildMediaUploadSection(),
+            _buildPropertyVerificationSection(),
             const SizedBox(height: 24),
             _buildBottomButtons(),
             const SizedBox(height: 32),
@@ -755,9 +1014,10 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
       Container(
         margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
         decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: kBorderColor.withOpacity(0.5)),
+          color: VxrTokens.surface,
+          borderRadius: BorderRadius.circular(VxrTokens.radius),
+          border: Border.all(color: VxrTokens.border),
+          boxShadow: VxrTokens.shadowSm,
         ),
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -915,6 +1175,137 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
   );
 
   // IMPROVED: Listing Title Section - Now properly left-aligned
+  // ─────────────────────────────────────────────
+  // LISTING TYPE SELECTOR (top of form)
+  // ─────────────────────────────────────────────
+  // Drives downstream UI: which Rules & Policies labels to show,
+  // which Terms & Conditions to surface, and which contract
+  // template (lease vs month-to-month rent) to ship to the
+  // tenant after approval.
+  Widget _buildListingTypeSelector() => _sectionCard(
+    title: 'Listing Type',
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Choose how this property is offered. This drives the rental '
+          'rules, terms & conditions, and contract template tenants will '
+          'see and sign.',
+          style: TextStyle(fontSize: 12, color: kHintColor, height: 1.4),
+        ),
+        const SizedBox(height: 14),
+        Row(
+          children: [
+            Expanded(
+              child: _listingTypeCard(
+                value: 'rent',
+                title: 'For Rent',
+                subtitle:
+                    'Month-to-month, auto-renews each month with '
+                    '30-day notice to terminate.',
+                icon: Icons.event_repeat_rounded,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _listingTypeCard(
+                value: 'lease',
+                title: 'For Lease',
+                subtitle:
+                    'Fixed term (e.g. 12 months). Early termination '
+                    'forfeits the security deposit.',
+                icon: Icons.assignment_turned_in_outlined,
+              ),
+            ),
+          ],
+        ),
+      ],
+    ),
+  );
+
+  Widget _listingTypeCard({
+    required String value,
+    required String title,
+    required String subtitle,
+    required IconData icon,
+  }) {
+    final selected = _listingType == value;
+    return GestureDetector(
+      onTap: () {
+        if (_listingType == value) return;
+        setState(() {
+          _listingType = value;
+          // Wipe any landlord overrides — they were authored against
+          // the previous type's defaults and would not make sense
+          // mixed with the new template.
+          _termsOverride = null;
+        });
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: selected ? kCoral.withValues(alpha: 0.08) : Colors.white,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: selected ? kCoral : kBorderColor,
+            width: selected ? 1.6 : 1,
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: selected
+                        ? kCoral.withValues(alpha: 0.15)
+                        : const Color(0xFFF1F1F3),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(
+                    icon,
+                    size: 18,
+                    color: selected ? kCoral : Colors.black54,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: selected ? kCoral : kSectionTitle,
+                    ),
+                  ),
+                ),
+                Icon(
+                  selected
+                      ? Icons.radio_button_checked
+                      : Icons.radio_button_unchecked,
+                  size: 18,
+                  color: selected ? kCoral : Colors.grey.shade400,
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              subtitle,
+              style: const TextStyle(
+                fontSize: 12,
+                color: kLabelColor,
+                height: 1.35,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildListingTitleSection() => _sectionCard(
     title: 'Listing Title',
     child: Column(
@@ -1047,13 +1438,19 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _buildTwoColumnRow(
-          child1: _buildTextFieldColumn('City', _cityCtrl, 'Enter city'),
-          child2: _buildTextFieldColumn(
-            'Province / Region',
-            _provinceCtrl,
-            'Enter province or region',
-          ),
+        PsgcLocationField(
+          initialProvinceName: _provinceCtrl.text,
+          initialCityName: _cityCtrl.text,
+          initialBarangayName: _streetAreaCtrl.text,
+          onChanged: (val) {
+            // Persist the human-readable names to the existing controllers
+            // so the save path (which writes city/province/barangay strings)
+            // continues to work unchanged. NCR has no provinces, so we fall
+            // back to the region name in the province slot.
+            _provinceCtrl.text = val.province?.name ?? val.region?.name ?? '';
+            _cityCtrl.text = val.city?.name ?? '';
+            _streetAreaCtrl.text = val.barangay?.name ?? '';
+          },
         ),
         const SizedBox(height: 12),
         _fieldLabel('Full Address'),
@@ -1063,17 +1460,12 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
           style: const TextStyle(fontSize: 13),
         ),
         const SizedBox(height: 12),
-        _buildTwoColumnRow(
-          child1: _buildTextFieldColumn(
-            'Street Area',
-            _streetAreaCtrl,
-            'Enter street area',
-          ),
-          child2: _buildTextFieldColumn(
-            'Postal Code',
-            _postalCodeCtrl,
-            'Enter postal code',
-          ),
+        _fieldLabel('Postal Code'),
+        TextField(
+          controller: _postalCodeCtrl,
+          decoration: _inputDecoration('Enter postal code'),
+          style: const TextStyle(fontSize: 13),
+          keyboardType: TextInputType.number,
         ),
         const SizedBox(height: 12),
         const SizedBox(height: 12),
@@ -1202,7 +1594,14 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
               _dropdown(
                 hint: 'Select payment method',
                 value: _paymentMethod,
-                items: ['Post-Dated Checks', 'Bank Transfer', 'GCash', 'Maya', 'Cash', 'Any'],
+                items: [
+                  'Post-Dated Checks',
+                  'Bank Transfer',
+                  'GCash',
+                  'Maya',
+                  'Cash',
+                  'Any',
+                ],
                 onChanged: (v) => setState(() => _paymentMethod = v),
               ),
             ],
@@ -1282,52 +1681,34 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
             ],
           ),
         ),
-        SizedBox(
-          width: MediaQuery.of(context).size.width > 600
-              ? 220
-              : double.infinity,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _fieldLabel('Listing Type:'),
-              _dropdown(
-                hint: 'Lease (Fixed Term)',
-                value: _listingType == 'rent'
-                    ? 'Month-to-Month Rent'
-                    : 'Lease (Fixed Term)',
-                items: const [
-                  'Lease (Fixed Term)',
-                  'Month-to-Month Rent',
-                ],
-                onChanged: (v) => setState(() => _listingType =
-                    v == 'Month-to-Month Rent' ? 'rent' : 'lease'),
-              ),
-            ],
+        // Lease term only matters for fixed-term lease listings.
+        // For month-to-month rent we hide it to reduce clutter; the
+        // contract template hard-codes the auto-renew language.
+        if (_listingType == 'lease')
+          SizedBox(
+            width: MediaQuery.of(context).size.width > 600
+                ? 220
+                : double.infinity,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _fieldLabel('Lease Term (Months):'),
+                _dropdown(
+                  hint: '12 months',
+                  value: _leaseTerm,
+                  items: [
+                    '1 month',
+                    '3 months',
+                    '6 months',
+                    '12 months',
+                    '24 months',
+                  ],
+                  onChanged: (v) =>
+                      setState(() => _leaseTerm = v ?? '12 months'),
+                ),
+              ],
+            ),
           ),
-        ),
-        SizedBox(
-          width: MediaQuery.of(context).size.width > 600
-              ? 200
-              : double.infinity,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _fieldLabel('Lease Term (Months):'),
-              _dropdown(
-                hint: '12 months',
-                value: _leaseTerm,
-                items: [
-                  '1 month',
-                  '3 months',
-                  '6 months',
-                  '12 months',
-                  '24 months',
-                ],
-                onChanged: (v) => setState(() => _leaseTerm = v ?? '12 months'),
-              ),
-            ],
-          ),
-        ),
       ],
     ),
   );
@@ -1479,222 +1860,1052 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
           crossAxisSpacing: 12,
           childAspectRatio: 3.5,
           children: [
-            _buildFeatureCheckbox('Security', _hasSecurity, (v) => setState(() => _hasSecurity = v ?? false)),
-            _buildFeatureCheckbox('Elevator', _hasElevator, (v) => setState(() => _hasElevator = v ?? false)),
-            _buildFeatureCheckbox('Backup Power', _hasBackupPower, (v) => setState(() => _hasBackupPower = v ?? false)),
-            _buildFeatureCheckbox('Pool', _hasPool, (v) => setState(() => _hasPool = v ?? false)),
-            _buildFeatureCheckbox('Gym', _hasGym, (v) => setState(() => _hasGym = v ?? false)),
-            _buildFeatureCheckbox('Laundry Area', _hasLaundryArea, (v) => setState(() => _hasLaundryArea = v ?? false)),
-            _buildFeatureCheckbox('Function Hall', _hasFunctionHall, (v) => setState(() => _hasFunctionHall = v ?? false)),
-            _buildFeatureCheckbox('Playground', _hasPlayground, (v) => setState(() => _hasPlayground = v ?? false)),
+            _buildFeatureCheckbox(
+              'Security',
+              _hasSecurity,
+              (v) => setState(() => _hasSecurity = v ?? false),
+            ),
+            _buildFeatureCheckbox(
+              'Elevator',
+              _hasElevator,
+              (v) => setState(() => _hasElevator = v ?? false),
+            ),
+            _buildFeatureCheckbox(
+              'Backup Power',
+              _hasBackupPower,
+              (v) => setState(() => _hasBackupPower = v ?? false),
+            ),
+            _buildFeatureCheckbox(
+              'Pool',
+              _hasPool,
+              (v) => setState(() => _hasPool = v ?? false),
+            ),
+            _buildFeatureCheckbox(
+              'Gym',
+              _hasGym,
+              (v) => setState(() => _hasGym = v ?? false),
+            ),
+            _buildFeatureCheckbox(
+              'Laundry Area',
+              _hasLaundryArea,
+              (v) => setState(() => _hasLaundryArea = v ?? false),
+            ),
+            _buildFeatureCheckbox(
+              'Function Hall',
+              _hasFunctionHall,
+              (v) => setState(() => _hasFunctionHall = v ?? false),
+            ),
+            _buildFeatureCheckbox(
+              'Playground',
+              _hasPlayground,
+              (v) => setState(() => _hasPlayground = v ?? false),
+            ),
           ],
         ),
       ],
     ),
   );
 
-  Widget _buildFeatureCheckbox(String label, bool value, ValueChanged<bool?> onChanged) => Row(
+  Widget _buildFeatureCheckbox(
+    String label,
+    bool value,
+    ValueChanged<bool?> onChanged,
+  ) => Row(
     children: [
       _squareCheckbox(value: value, onChanged: onChanged, label: ''),
       const SizedBox(width: 8),
       Expanded(
-        child: Text(label, style: const TextStyle(fontSize: 13, color: kLabelColor), overflow: TextOverflow.ellipsis),
+        child: Text(
+          label,
+          style: const TextStyle(fontSize: 13, color: kLabelColor),
+          overflow: TextOverflow.ellipsis,
+        ),
       ),
     ],
   );
 
-  Widget _buildRulesAndPoliciesSection() => _sectionCard(
-    title: 'Rental Rules & Policies',
-    child: Column(
-      children: [
-        Wrap(
-          spacing: 16,
-          runSpacing: 16,
-          children: [
-            SizedBox(
-              width: MediaQuery.of(context).size.width > 600
-                  ? 200
-                  : double.infinity,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _fieldLabel('Pets allowed:'),
-                  Wrap(
-                    spacing: 16,
-                    children: [
-                      _redRadio<bool>(
-                        value: true,
-                        groupValue: _petsAllowed,
-                        onChanged: (_) => setState(() => _petsAllowed = true),
-                        label: 'Yes',
+  Widget _buildRulesAndPoliciesSection() {
+    final isLease = _listingType == 'lease';
+    return _sectionCard(
+      title: isLease ? 'Lease Rules & Policies' : 'Rental Rules & Policies',
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            margin: const EdgeInsets.only(bottom: 14),
+            decoration: BoxDecoration(
+              color: kCoral.withValues(alpha: 0.07),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: kCoral.withValues(alpha: 0.25)),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  isLease ? Icons.assignment_outlined : Icons.event_repeat,
+                  size: 16,
+                  color: kCoral,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    isLease
+                        ? 'These policies apply to a fixed-term lease and '
+                              'will be referenced in the lease agreement.'
+                        : 'These policies apply to a month-to-month rental '
+                              'and will be referenced in the rental agreement.',
+                    style: const TextStyle(
+                      fontSize: 11.5,
+                      color: kLabelColor,
+                      height: 1.35,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Wrap(
+            spacing: 16,
+            runSpacing: 16,
+            children: [
+              SizedBox(
+                width: MediaQuery.of(context).size.width > 600
+                    ? 200
+                    : double.infinity,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _fieldLabel('Pets allowed:'),
+                    Wrap(
+                      spacing: 16,
+                      children: [
+                        _redRadio<bool>(
+                          value: true,
+                          groupValue: _petsAllowed,
+                          onChanged: (_) => setState(() => _petsAllowed = true),
+                          label: 'Yes',
+                        ),
+                        _redRadio<bool>(
+                          value: false,
+                          groupValue: _petsAllowed,
+                          onChanged: (_) =>
+                              setState(() => _petsAllowed = false),
+                          label: 'No',
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              SizedBox(
+                width: MediaQuery.of(context).size.width > 600
+                    ? 200
+                    : double.infinity,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _fieldLabel('Smoking Allowed:'),
+                    Wrap(
+                      spacing: 16,
+                      children: [
+                        _redRadio<bool>(
+                          value: true,
+                          groupValue: _smokingAllowed,
+                          onChanged: (_) =>
+                              setState(() => _smokingAllowed = true),
+                          label: 'Yes',
+                        ),
+                        _redRadio<bool>(
+                          value: false,
+                          groupValue: _smokingAllowed,
+                          onChanged: (_) =>
+                              setState(() => _smokingAllowed = false),
+                          label: 'No',
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Wrap(
+            spacing: 16,
+            runSpacing: 16,
+            children: [
+              SizedBox(
+                width: MediaQuery.of(context).size.width > 600
+                    ? 200
+                    : double.infinity,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _fieldLabel('Guest Policy:'),
+                    _dropdown(
+                      hint: 'Day/Nite Only',
+                      value: _guestPolicy,
+                      items: [
+                        'Day/Nite Only',
+                        'Day Only',
+                        'No Guests',
+                        'Open Policy',
+                      ],
+                      onChanged: (v) =>
+                          setState(() => _guestPolicy = v ?? 'Day/Nite Only'),
+                    ),
+                  ],
+                ),
+              ),
+              SizedBox(
+                width: MediaQuery.of(context).size.width > 600
+                    ? 200
+                    : double.infinity,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _fieldLabel('Curfew:'),
+                    Wrap(
+                      spacing: 16,
+                      children: [
+                        _redRadio<bool>(
+                          value: true,
+                          groupValue: _noCurfew,
+                          onChanged: (_) => setState(() => _noCurfew = true),
+                          label: 'No Curfew',
+                        ),
+                        _redRadio<bool>(
+                          value: false,
+                          groupValue: _noCurfew,
+                          onChanged: (_) => setState(() => _noCurfew = false),
+                          label: 'With Curfew',
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Wrap(
+            spacing: 16,
+            runSpacing: 16,
+            children: [
+              SizedBox(
+                width: MediaQuery.of(context).size.width > 600
+                    ? 200
+                    : double.infinity,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _fieldLabel('Subletting:'),
+                    Wrap(
+                      spacing: 16,
+                      children: [
+                        _redRadio<bool>(
+                          value: true,
+                          groupValue: _sublettingAllowed,
+                          onChanged: (_) =>
+                              setState(() => _sublettingAllowed = true),
+                          label: 'Allowed',
+                        ),
+                        _redRadio<bool>(
+                          value: false,
+                          groupValue: _sublettingAllowed,
+                          onChanged: (_) =>
+                              setState(() => _sublettingAllowed = false),
+                          label: 'Not Allowed',
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              SizedBox(
+                width: MediaQuery.of(context).size.width > 600
+                    ? 200
+                    : double.infinity,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _fieldLabel('Modifications:'),
+                    Wrap(
+                      spacing: 16,
+                      children: [
+                        _redRadio<bool>(
+                          value: true,
+                          groupValue: _modificationAllowed,
+                          onChanged: (_) =>
+                              setState(() => _modificationAllowed = true),
+                          label: 'Allowed',
+                        ),
+                        _redRadio<bool>(
+                          value: false,
+                          groupValue: _modificationAllowed,
+                          onChanged: (_) =>
+                              setState(() => _modificationAllowed = false),
+                          label: 'Not Allowed',
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          if (isLease) ...[
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFF8F0),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFFFFE0C0)),
+              ),
+              child: Row(
+                children: const [
+                  Icon(
+                    Icons.gavel_outlined,
+                    color: Color(0xFFE07820),
+                    size: 18,
+                  ),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Lease-only: early termination by the tenant forfeits '
+                      'the security deposit unless agreed in writing. Renewal '
+                      'requires 60 days prior notice.',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        color: kLabelColor,
+                        height: 1.35,
                       ),
-                      _redRadio<bool>(
-                        value: false,
-                        groupValue: _petsAllowed,
-                        onChanged: (_) => setState(() => _petsAllowed = false),
-                        label: 'No',
-                      ),
-                    ],
+                    ),
                   ),
                 ],
               ),
             ),
-            SizedBox(
-              width: MediaQuery.of(context).size.width > 600
-                  ? 200
-                  : double.infinity,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _fieldLabel('Smoking Allowed:'),
-                  Wrap(
-                    spacing: 16,
-                    children: [
-                      _redRadio<bool>(
-                        value: true,
-                        groupValue: _smokingAllowed,
-                        onChanged: (_) =>
-                            setState(() => _smokingAllowed = true),
-                        label: 'Yes',
+          ] else ...[
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFEFF6FF),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFFBFDBFE)),
+              ),
+              child: Row(
+                children: const [
+                  Icon(Icons.info_outline, color: Color(0xFF1D4ED8), size: 18),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Rent-only: either party may terminate with 30 days '
+                      'written notice. Rent may be adjusted with 30 days '
+                      'prior notice (subject to R.A. 9653).',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        color: kLabelColor,
+                        height: 1.35,
                       ),
-                      _redRadio<bool>(
-                        value: false,
-                        groupValue: _smokingAllowed,
-                        onChanged: (_) =>
-                            setState(() => _smokingAllowed = false),
-                        label: 'No',
-                      ),
-                    ],
+                    ),
                   ),
                 ],
               ),
             ),
           ],
-        ),
-        const SizedBox(height: 16),
-        Wrap(
-          spacing: 16,
-          runSpacing: 16,
-          children: [
-            SizedBox(
-              width: MediaQuery.of(context).size.width > 600
-                  ? 200
-                  : double.infinity,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _fieldLabel('Guest Policy:'),
-                  _dropdown(
-                    hint: 'Day/Nite Only',
-                    value: _guestPolicy,
-                    items: [
-                      'Day/Nite Only',
-                      'Day Only',
-                      'No Guests',
-                      'Open Policy',
-                    ],
-                    onChanged: (v) =>
-                        setState(() => _guestPolicy = v ?? 'Day/Nite Only'),
+        ],
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────
+  // TERMS & CONDITIONS  (per listing type)
+  // ─────────────────────────────────────────────
+  // Read-only by default — landlord taps "Customize" to edit each
+  // clause inline. The edited terms are persisted via
+  // listings.terms_override (JSONB array of strings) and rendered
+  // verbatim by contract_view_screen at signing time.
+  Widget _buildTermsAndConditionsSection() {
+    final isLease = _listingType == 'lease';
+    final terms = _termsOverride ?? defaultTermsForType(_listingType);
+    final isCustomized = _termsOverride != null;
+
+    return _sectionCard(
+      title: isLease ? 'Lease Terms & Conditions' : 'Rental Terms & Conditions',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  isCustomized
+                      ? 'You have customized the default terms. '
+                            'Tenants will see exactly what is below.'
+                      : 'These are the standard ${isLease ? 'lease' : 'rental'} '
+                            'terms tenants will see and sign.',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: kHintColor,
+                    height: 1.4,
+                  ),
+                ),
+              ),
+              if (isCustomized)
+                TextButton.icon(
+                  onPressed: () {
+                    setState(() => _termsOverride = null);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Restored default terms.')),
+                    );
+                  },
+                  icon: const Icon(Icons.restart_alt, size: 16),
+                  label: const Text('Reset'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: kCoral,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Container(
+            decoration: BoxDecoration(
+              color: const Color(0xFFFAFAFA),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: kBorderColor),
+            ),
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (int i = 0; i < terms.length; i++) ...[
+                  if (i > 0) const SizedBox(height: 10),
+                  Text(
+                    terms[i],
+                    style: const TextStyle(
+                      fontSize: 12.5,
+                      height: 1.45,
+                      color: kLabelColor,
+                    ),
                   ),
                 ],
-              ),
+              ],
             ),
-            SizedBox(
-              width: MediaQuery.of(context).size.width > 600
-                  ? 200
-                  : double.infinity,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              OutlinedButton.icon(
+                onPressed: () => _openTermsEditor(),
+                icon: const Icon(Icons.edit_outlined, size: 16),
+                label: Text(isCustomized ? 'Edit Terms' : 'Customize Terms'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: kCoral,
+                  side: const BorderSide(color: kCoral),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              if (isCustomized)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: kCoral.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: const Text(
+                    'CUSTOMIZED',
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      color: kCoral,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _openTermsEditor() async {
+    final base = _termsOverride ?? defaultTermsForType(_listingType);
+    final controllers = base
+        .map((t) => TextEditingController(text: t))
+        .toList(growable: true);
+
+    final result = await showDialog<List<String>?>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogCtx) => StatefulBuilder(
+        builder: (ctx, setLocal) => Dialog(
+          insetPadding: const EdgeInsets.all(16),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 720),
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.edit_note, color: kCoral, size: 22),
+                    const SizedBox(width: 8),
+                    const Expanded(
+                      child: Text(
+                        'Customize Terms & Conditions',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: kSectionTitle,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: () => Navigator.pop(dialogCtx, null),
+                    ),
+                  ],
+                ),
+                const Divider(height: 16),
+                Flexible(
+                  child: SingleChildScrollView(
+                    child: Column(
+                      children: [
+                        for (int i = 0; i < controllers.length; i++) ...[
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                child: TextField(
+                                  controller: controllers[i],
+                                  maxLines: null,
+                                  decoration: InputDecoration(
+                                    labelText: 'Clause ${i + 1}',
+                                    border: const OutlineInputBorder(),
+                                    isDense: true,
+                                  ),
+                                  style: const TextStyle(fontSize: 12.5),
+                                ),
+                              ),
+                              IconButton(
+                                tooltip: 'Remove clause',
+                                icon: const Icon(
+                                  Icons.delete_outline,
+                                  color: kRedSelected,
+                                ),
+                                onPressed: controllers.length <= 1
+                                    ? null
+                                    : () => setLocal(
+                                        () => controllers.removeAt(i),
+                                      ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+                        ],
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: TextButton.icon(
+                            onPressed: () => setLocal(
+                              () => controllers.add(TextEditingController()),
+                            ),
+                            icon: const Icon(Icons.add, size: 16),
+                            label: const Text('Add Clause'),
+                            style: TextButton.styleFrom(
+                              foregroundColor: kCoral,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const Divider(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(dialogCtx, []),
+                      child: const Text(
+                        'Reset to Default',
+                        style: TextStyle(color: kRedSelected),
+                      ),
+                    ),
+                    const Spacer(),
+                    OutlinedButton(
+                      onPressed: () => Navigator.pop(dialogCtx, null),
+                      child: const Text('Cancel'),
+                    ),
+                    const SizedBox(width: 8),
+                    ElevatedButton(
+                      onPressed: () {
+                        final edited = controllers
+                            .map((c) => c.text.trim())
+                            .where((t) => t.isNotEmpty)
+                            .toList();
+                        Navigator.pop(dialogCtx, edited);
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: kCoral,
+                        foregroundColor: Colors.white,
+                      ),
+                      child: const Text('Save'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    for (final c in controllers) {
+      c.dispose();
+    }
+
+    if (!mounted || result == null) return;
+
+    setState(() {
+      // Empty list → user reset to defaults.
+      _termsOverride = result.isEmpty ? null : result;
+    });
+  }
+
+  // ─────────────────────────────────────────────
+  // CONTRACT TEMPLATE SECTION
+  // ─────────────────────────────────────────────
+  // Three things the landlord can do here:
+  //   1. Preview the current contract template (pre-filled with
+  //      whatever they have entered on the form so far).
+  //   2. Export it as a .txt file they can edit externally.
+  //   3. Re-upload a modified file (PDF / DOC / DOCX / TXT) which
+  //      then becomes the contract shipped to tenants.
+  Widget _buildContractTemplateSection() {
+    final isLease = _listingType == 'lease';
+    final hasFile =
+        _contractTemplateFile != null || _contractTemplateUrl != null;
+    final fileLabel =
+        _contractTemplateFile?.name ??
+        _contractTemplateName ??
+        (_contractTemplateUrl?.split('/').last ?? 'contract');
+
+    return _sectionCard(
+      title: 'Contract Template',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: kCoral.withValues(alpha: 0.07),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: kCoral.withValues(alpha: 0.25)),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  isLease
+                      ? Icons.assignment_turned_in_outlined
+                      : Icons.event_repeat_rounded,
+                  size: 16,
+                  color: kCoral,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    isLease
+                        ? 'Default: Residential Lease Agreement (fixed term).'
+                        : 'Default: Month-to-Month Rental Agreement.',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: kLabelColor,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+          const Text(
+            'Preview the template, export a copy you can edit on your '
+            'computer, then re-upload the modified file to use it as the '
+            'binding contract for this listing.',
+            style: TextStyle(fontSize: 12, color: kHintColor, height: 1.4),
+          ),
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              OutlinedButton.icon(
+                onPressed: _previewContractTemplate,
+                icon: const Icon(Icons.visibility_outlined, size: 16),
+                label: const Text('Preview'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: kCoral,
+                  side: const BorderSide(color: kCoral),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+              ),
+              OutlinedButton.icon(
+                onPressed: _exportContractTemplate,
+                icon: const Icon(Icons.download_outlined, size: 16),
+                label: const Text('Export'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: kCoral,
+                  side: const BorderSide(color: kCoral),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+              ),
+              ElevatedButton.icon(
+                onPressed: _pickContractTemplateFile,
+                icon: const Icon(Icons.upload_file, size: 16),
+                label: Text(
+                  hasFile ? 'Replace Uploaded File' : 'Upload Modified File',
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: kCoral,
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (hasFile) ...[
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF7FBF4),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFFCDE9C2)),
+              ),
+              child: Row(
                 children: [
-                  _fieldLabel('Curfew:'),
-                  Wrap(
-                    spacing: 16,
-                    children: [
-                      _redRadio<bool>(
-                        value: true,
-                        groupValue: _noCurfew,
-                        onChanged: (_) => setState(() => _noCurfew = true),
-                        label: 'No Curfew',
-                      ),
-                      _redRadio<bool>(
-                        value: false,
-                        groupValue: _noCurfew,
-                        onChanged: (_) => setState(() => _noCurfew = false),
-                        label: 'With Curfew',
-                      ),
-                    ],
+                  const Icon(
+                    Icons.description_outlined,
+                    color: Color(0xFF1A9E4A),
+                    size: 22,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          fileLabel,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: kLabelColor,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          _contractTemplateFile != null
+                              ? 'Will be uploaded when you save the listing.'
+                              : 'Currently active for this listing.',
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: kHintColor,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Remove uploaded file',
+                    icon: const Icon(
+                      Icons.delete_outline,
+                      color: kRedSelected,
+                      size: 20,
+                    ),
+                    onPressed: () {
+                      setState(() {
+                        _contractTemplateFile = null;
+                        _contractTemplateUrl = null;
+                        _contractTemplateName = null;
+                      });
+                    },
                   ),
                 ],
               ),
             ),
           ],
+        ],
+      ),
+    );
+  }
+
+  // Build the strongly-typed input the PDF/text helpers consume.
+  // Uses whatever the landlord has typed into the form so far —
+  // any blanks render as `[…]` placeholders so the file remains
+  // editable.
+  ContractTemplateInput _composeContractInput() {
+    final terms = _termsOverride ?? defaultTermsForType(_listingType);
+    final propertyAddress = [
+      _fullAddressCtrl.text,
+      _streetAreaCtrl.text,
+      _cityCtrl.text,
+      _provinceCtrl.text,
+    ].where((e) => e.trim().isNotEmpty).join(', ');
+    final startDate = _availableFrom != null
+        ? _formatLongDate(_availableFrom!)
+        : null;
+    final endDate = _availableFrom != null && _listingType == 'lease'
+        ? _formatLongDate(_addLeaseTerm(_availableFrom!, _leaseTerm))
+        : null;
+    final agreementDate = _formatLongDate(DateTime.now());
+    return ContractTemplateInput(
+      listingType: _listingType,
+      terms: terms,
+      landlordName: _hostNameCtrl.text,
+      propertyTitle: _listingTitleCtrl.text,
+      propertyAddress: propertyAddress,
+      propertyType: _propertyType,
+      leaseStartDate: startDate,
+      leaseEndDate: endDate,
+      leaseDuration: _listingType == 'lease' ? _leaseTerm : null,
+      monthlyRent: _monthlyRentCtrl.text,
+      securityDeposit: _securityDepositCtrl.text,
+      advancePayment: _advancePaymentCtrl.text,
+      agreementDate: agreementDate,
+    );
+  }
+
+  static const List<String> _kMonthNames = [
+    'January',
+    'February',
+    'March',
+    'April',
+    'May',
+    'June',
+    'July',
+    'August',
+    'September',
+    'October',
+    'November',
+    'December',
+  ];
+
+  String _formatLongDate(DateTime d) =>
+      '${_kMonthNames[d.month - 1]} ${d.day}, ${d.year}';
+
+  // Approximate lease end date by parsing "12 months", "6 months", etc.
+  // and adding the month count to the start date.
+  DateTime _addLeaseTerm(DateTime start, String term) {
+    final match = RegExp(r'(\d+)').firstMatch(term);
+    final months = int.tryParse(match?.group(1) ?? '') ?? 12;
+    return DateTime(start.year, start.month + months, start.day);
+  }
+
+  Future<void> _previewContractTemplate() async {
+    if (!mounted) return;
+    final input = _composeContractInput();
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => Scaffold(
+          appBar: AppBar(
+            backgroundColor: kCoral,
+            foregroundColor: Colors.white,
+            elevation: 0,
+            title: const Text(
+              'Contract Preview',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+            ),
+            actions: [
+              IconButton(
+                tooltip: 'Copy text',
+                icon: const Icon(Icons.copy_outlined),
+                onPressed: () async {
+                  await Clipboard.setData(
+                    ClipboardData(text: buildContractTemplateText(input)),
+                  );
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Copied to clipboard')),
+                  );
+                },
+              ),
+            ],
+          ),
+          body: PdfPreview(
+            build: (format) async {
+              final doc = await buildContractPdf(input);
+              return doc.save();
+            },
+            allowPrinting: true,
+            allowSharing: true,
+            canChangePageFormat: false,
+            canChangeOrientation: false,
+            canDebug: false,
+            pdfFileName:
+                '${_listingType}_contract_${DateTime.now().millisecondsSinceEpoch}.pdf',
+          ),
         ),
-        const SizedBox(height: 16),
-        Wrap(
-          spacing: 16,
-          runSpacing: 16,
-          children: [
-            SizedBox(
-              width: MediaQuery.of(context).size.width > 600
-                  ? 200
-                  : double.infinity,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _fieldLabel('Subletting:'),
-                  Wrap(
-                    spacing: 16,
+      ),
+    );
+  }
+
+  Future<void> _exportContractTemplate() async {
+    try {
+      final input = _composeContractInput();
+      final doc = await buildContractPdf(input);
+      final bytes = await doc.save();
+      final dir = await getApplicationDocumentsDirectory();
+      final stamp = DateTime.now().millisecondsSinceEpoch;
+      final fileName = '${_listingType}_contract_$stamp.pdf';
+      final file = File('${dir.path}/$fileName');
+      await file.writeAsBytes(bytes);
+
+      if (!mounted) return;
+      // Offer Share (system share sheet — saves to Downloads, email,
+      // etc.) and Open (launch the local copy in a PDF viewer).
+      await showModalBottomSheet<void>(
+        context: context,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        ),
+        builder: (sheetCtx) => SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 40,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 16),
+                  child: Row(
                     children: [
-                      _redRadio<bool>(
-                        value: true,
-                        groupValue: _sublettingAllowed,
-                        onChanged: (_) => setState(() => _sublettingAllowed = true),
-                        label: 'Allowed',
-                      ),
-                      _redRadio<bool>(
-                        value: false,
-                        groupValue: _sublettingAllowed,
-                        onChanged: (_) => setState(() => _sublettingAllowed = false),
-                        label: 'Not Allowed',
+                      Icon(Icons.picture_as_pdf, color: kCoral),
+                      SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'Contract PDF ready',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                            color: kSectionTitle,
+                          ),
+                        ),
                       ),
                     ],
                   ),
-                ],
-              ),
-            ),
-            SizedBox(
-              width: MediaQuery.of(context).size.width > 600
-                  ? 200
-                  : double.infinity,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _fieldLabel('Modifications:'),
-                  Wrap(
-                    spacing: 16,
-                    children: [
-                      _redRadio<bool>(
-                        value: true,
-                        groupValue: _modificationAllowed,
-                        onChanged: (_) => setState(() => _modificationAllowed = true),
-                        label: 'Allowed',
-                      ),
-                      _redRadio<bool>(
-                        value: false,
-                        groupValue: _modificationAllowed,
-                        onChanged: (_) => setState(() => _modificationAllowed = false),
-                        label: 'Not Allowed',
-                      ),
-                    ],
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+                  child: Text(
+                    fileName,
+                    style: const TextStyle(fontSize: 12, color: kHintColor),
                   ),
-                ],
-              ),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.ios_share, color: kCoral),
+                  title: const Text('Share / Save to device'),
+                  subtitle: const Text(
+                    'Open the system share sheet to save to Downloads, '
+                    'email, or another app.',
+                  ),
+                  onTap: () async {
+                    Navigator.pop(sheetCtx);
+                    await Printing.sharePdf(bytes: bytes, filename: fileName);
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.open_in_new, color: kCoral),
+                  title: const Text('Open in PDF viewer'),
+                  subtitle: Text(
+                    file.path,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  onTap: () async {
+                    Navigator.pop(sheetCtx);
+                    final uri = Uri.file(file.path);
+                    if (await canLaunchUrl(uri)) {
+                      await launchUrl(uri);
+                    }
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.print_outlined, color: kCoral),
+                  title: const Text('Print'),
+                  onTap: () async {
+                    Navigator.pop(sheetCtx);
+                    await Printing.layoutPdf(
+                      onLayout: (_) async => bytes,
+                      name: fileName,
+                    );
+                  },
+                ),
+              ],
             ),
-          ],
+          ),
         ),
-      ],
-    ),
-  );
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Export failed: $e')));
+    }
+  }
+
+  Future<void> _pickContractTemplateFile() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const ['pdf', 'doc', 'docx', 'txt', 'rtf'],
+        withData: true,
+      );
+      if (result == null || result.files.isEmpty) return;
+      final file = result.files.first;
+      if (file.bytes == null && file.path == null) return;
+      setState(() {
+        _contractTemplateFile = file;
+        // A new local file supersedes any previously-saved remote file.
+        _contractTemplateUrl = null;
+        _contractTemplateName = file.name;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Could not pick file: $e')));
+    }
+  }
 
   Widget _buildHostInformationSection() => _sectionCard(
     title: 'Host Information',
@@ -1756,6 +2967,139 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
     ),
   );
 
+  Future<void> _pickVerificationDoc() async {
+    final f = await _picker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 85,
+    );
+    if (f != null) setState(() => _verificationDoc = f);
+  }
+
+  Widget _buildPropertyVerificationSection() => _sectionCard(
+    title: 'Property Verification',
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Expanded(
+              child: Text(
+                'Upload a proof of ownership (e.g. land title, '
+                'tax declaration, or utility bill).',
+                style: TextStyle(fontSize: 12, color: kHintColor),
+              ),
+            ),
+            if (_listingVerified) ...[
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: VxrTokens.accent.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.verified, size: 14, color: VxrTokens.accent),
+                    SizedBox(width: 4),
+                    Text(
+                      'Verified',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: VxrTokens.accent,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ] else if (_verificationDocUrl?.isNotEmpty ?? false) ...[
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: VxrTokens.warning.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.hourglass_top_rounded,
+                      size: 14,
+                      color: VxrTokens.warning,
+                    ),
+                    SizedBox(width: 4),
+                    Text(
+                      'Pending Review',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: VxrTokens.warning,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
+        const SizedBox(height: 14),
+        GestureDetector(
+          onTap: _pickVerificationDoc,
+          child: DashedBorderBox(
+            child: Container(
+              height: 110,
+              width: double.infinity,
+              color: Colors.transparent,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    _verificationDoc != null ||
+                            (_verificationDocUrl?.isNotEmpty ?? false)
+                        ? Icons.description
+                        : Icons.upload_file_outlined,
+                    size: 32,
+                    color:
+                        _verificationDoc != null ||
+                            (_verificationDocUrl?.isNotEmpty ?? false)
+                        ? VxrTokens.accent
+                        : const Color(0xFF999999),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    _verificationDoc != null
+                        ? _verificationDoc!.name
+                        : (_verificationDocUrl?.isNotEmpty ?? false)
+                        ? 'Document on file'
+                        : 'Upload Verification Document',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color:
+                          _verificationDoc != null ||
+                              (_verificationDocUrl?.isNotEmpty ?? false)
+                          ? VxrTokens.accent
+                          : kLabelColor,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'Tap to select an image (required for new listings)',
+                    style: TextStyle(fontSize: 12, color: kHintColor),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+
   Widget _buildMediaUploadSection() => _sectionCard(
     title: 'Media Upload',
     child: Column(
@@ -1783,7 +3127,7 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
                     size: 32,
                     color: _propertyImages.isEmpty
                         ? const Color(0xFF999999)
-                        : const Color(0xfff36c6c),
+                        : VxrTokens.accent,
                   ),
                   const SizedBox(height: 8),
                   Text(
@@ -1793,7 +3137,9 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
                     style: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
-                      color: _propertyImages.isEmpty ? kLabelColor : const Color(0xfff36c6c),
+                      color: _propertyImages.isEmpty
+                          ? kLabelColor
+                          : VxrTokens.accent,
                     ),
                   ),
                   const SizedBox(height: 4),
@@ -1900,7 +3246,7 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
                     size: 32,
                     color: _media360Rooms.isEmpty
                         ? const Color(0xFF999999)
-                        : const Color(0xfff36c6c),
+                        : VxrTokens.accent,
                   ),
                   const SizedBox(height: 8),
                   Text(
@@ -1910,7 +3256,9 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
                     style: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
-                      color: _media360Rooms.isEmpty ? kLabelColor : const Color(0xfff36c6c),
+                      color: _media360Rooms.isEmpty
+                          ? kLabelColor
+                          : VxrTokens.accent,
                     ),
                   ),
                   const SizedBox(height: 4),
@@ -1954,8 +3302,11 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
                                   fit: BoxFit.cover,
                                   errorBuilder: (_, _, _) => Container(
                                     color: Colors.grey[300],
-                                    child: const Icon(Icons.view_in_ar,
-                                        size: 16, color: Colors.grey),
+                                    child: const Icon(
+                                      Icons.view_in_ar,
+                                      size: 16,
+                                      color: Colors.grey,
+                                    ),
                                   ),
                                 )
                               : Image.network(
@@ -1965,8 +3316,11 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
                                   fit: BoxFit.cover,
                                   errorBuilder: (_, _, _) => Container(
                                     color: Colors.grey[300],
-                                    child: const Icon(Icons.view_in_ar,
-                                        size: 16, color: Colors.grey),
+                                    child: const Icon(
+                                      Icons.view_in_ar,
+                                      size: 16,
+                                      color: Colors.grey,
+                                    ),
                                   ),
                                 ),
                         ),
@@ -1978,18 +3332,22 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
                         right: 0,
                         child: Container(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 4, vertical: 2),
+                            horizontal: 4,
+                            vertical: 2,
+                          ),
                           decoration: BoxDecoration(
                             color: Colors.black54,
                             borderRadius: const BorderRadius.vertical(
-                                bottom: Radius.circular(8)),
+                              bottom: Radius.circular(8),
+                            ),
                           ),
                           child: Text(
                             room.roomLabel,
                             style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 9,
-                                fontWeight: FontWeight.w500),
+                              color: Colors.white,
+                              fontSize: 9,
+                              fontWeight: FontWeight.w500,
+                            ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             textAlign: TextAlign.center,
@@ -2006,8 +3364,11 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
                             color: kCoral.withValues(alpha: 0.8),
                             shape: BoxShape.circle,
                           ),
-                          child: const Icon(Icons.view_in_ar,
-                              size: 10, color: Colors.white),
+                          child: const Icon(
+                            Icons.view_in_ar,
+                            size: 10,
+                            color: Colors.white,
+                          ),
                         ),
                       ),
                       Positioned(
@@ -2048,7 +3409,9 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
       MaterialPageRoute(
         builder: (_) => ListingImageManagerScreen(
           listingId: widget.existingListingId,
-          initialLocalImages: _propertyImages.isNotEmpty ? _propertyImages : null,
+          initialLocalImages: _propertyImages.isNotEmpty
+              ? _propertyImages
+              : null,
         ),
       ),
     );
@@ -2292,55 +3655,23 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
   Widget _buildBottomButtons() => Padding(
     padding: const EdgeInsets.symmetric(horizontal: 16),
     child: Row(
-      mainAxisAlignment: MainAxisAlignment.end,
       children: [
-        OutlinedButton(
-          onPressed: () => Navigator.pop(context),
-          style: OutlinedButton.styleFrom(
-            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 12),
-            side: const BorderSide(color: kBorderColor),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(6),
-            ),
-            backgroundColor: Colors.white,
-          ),
-          child: const Text(
-            'Cancel',
-            style: TextStyle(
-              color: kLabelColor,
-              fontSize: 14,
-              fontWeight: FontWeight.w500,
-            ),
+        Expanded(
+          child: VxrSecondaryButton(
+            label: 'Cancel',
+            onPressed: () => Navigator.pop(context),
           ),
         ),
-        const SizedBox(width: 12),
-        ElevatedButton(
-          onPressed: _isSaving ? null : _saveToSupabase,
-          style: ElevatedButton.styleFrom(
-            backgroundColor: kCoral,
-            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 12),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(6),
-            ),
-            elevation: 0,
+        const SizedBox(width: 10),
+        Expanded(
+          flex: 2,
+          child: VxrPrimaryButton(
+            label: widget.existingListingId != null
+                ? 'Save Changes'
+                : 'Create Listing',
+            loading: _isSaving,
+            onPressed: _saveToSupabase,
           ),
-          child: _isSaving
-              ? const SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: Colors.white,
-                  ),
-                )
-              : Text(
-                  widget.existingListingId != null ? 'Save Changes' : 'Create Listing',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
         ),
       ],
     ),
@@ -2350,32 +3681,101 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
     final userId = Supabase.instance.client.auth.currentUser?.id;
     if (userId == null) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Please log in first')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Please log in first')));
       }
+      return;
+    }
+
+    // New listings must include a proof-of-ownership document.
+    final isNewListing = widget.existingListingId == null;
+    if (isNewListing && _verificationDoc == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Please upload a verification document (Property Verification section).',
+          ),
+        ),
+      );
       return;
     }
 
     setState(() => _isSaving = true);
 
     try {
-      // Upload cover photo if selected
+      // Upload property verification document if a new file was picked.
+      String? verificationDocPath = _verificationDocUrl;
+      if (_verificationDoc != null) {
+        final bytes = await _verificationDoc!.readAsBytes();
+        verificationDocPath = await uploadListingVerificationDoc(
+          bytes: bytes,
+          fileName: _verificationDoc!.name,
+        );
+      }
+
+      // For existing listings: upload cover photo now (real ID is known).
+      // For NEW listings: defer the upload until after insertListing() so
+      // the file goes into the correct listingId/ folder instead of a
+      // temporary path.
       String? coverPhotoPath;
-      if (_coverPhoto != null) {
+      if (_coverPhoto != null && widget.existingListingId != null) {
         final bytes = await _coverPhoto!.readAsBytes();
         final ext = _coverPhoto!.name.split('.').last;
         final fileName = 'cover_${DateTime.now().millisecondsSinceEpoch}.$ext';
-        final tempId = widget.existingListingId ?? 'temp_${DateTime.now().millisecondsSinceEpoch}';
-        final storagePath = '$tempId/$fileName';
+        final storagePath = '${widget.existingListingId}/$fileName';
         await Supabase.instance.client.storage
             .from('listing-images')
             .uploadBinary(storagePath, bytes);
         coverPhotoPath = storagePath;
       }
 
-      final monthlyRent = double.tryParse(
-          _monthlyRentCtrl.text.replaceAll(RegExp(r'[^\d.]'), '')) ?? 0;
+      // Upload modified contract template (PDF/DOC/etc.) if the
+      // landlord picked a new one. Stored in a dedicated bucket so
+      // the listing-images RLS doesn't have to worry about
+      // non-image MIME types.
+      String? contractTemplatePath;
+      String? contractTemplateName;
+      if (_contractTemplateFile != null) {
+        try {
+          final picked = _contractTemplateFile!;
+          final bytes = picked.bytes ?? await File(picked.path!).readAsBytes();
+          final ext = picked.extension ?? 'bin';
+          final tempId =
+              widget.existingListingId ??
+              'temp_${DateTime.now().millisecondsSinceEpoch}';
+          final fileName =
+              'contract_${DateTime.now().millisecondsSinceEpoch}.$ext';
+          final storagePath = '$tempId/$fileName';
+          await Supabase.instance.client.storage
+              .from('listing-contracts')
+              .uploadBinary(storagePath, bytes);
+          contractTemplatePath = storagePath;
+          contractTemplateName = picked.name;
+        } catch (e) {
+          debugPrint('Contract template upload failed: $e');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  'Contract upload failed (continuing without): $e',
+                ),
+              ),
+            );
+          }
+        }
+      } else if (_contractTemplateUrl != null) {
+        // Editing an existing listing and the landlord did not
+        // touch the file — keep what's already there.
+        contractTemplatePath = _contractTemplateUrl;
+        contractTemplateName = _contractTemplateName;
+      }
+
+      final monthlyRent =
+          double.tryParse(
+            _monthlyRentCtrl.text.replaceAll(RegExp(r'[^\d.]'), ''),
+          ) ??
+          0;
 
       // Core listings table
       final core = <String, dynamic>{
@@ -2383,20 +3783,41 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
         'title': _listingTitleCtrl.text.isEmpty
             ? 'Untitled Listing'
             : _listingTitleCtrl.text,
-        'description': _aboutPlaceCtrl.text.isEmpty ? null : _aboutPlaceCtrl.text,
+        'description': _aboutPlaceCtrl.text.isEmpty
+            ? null
+            : _aboutPlaceCtrl.text,
         'property_type': _propertyType,
         'listing_type': _listingType,
         'status': _isActive ? 'active' : 'inactive',
         'cover_photo_url': ?coverPhotoPath,
+        // Always write these (including nulls) so removing an
+        // uploaded contract or resetting custom terms persists.
+        'contract_template_url': contractTemplatePath,
+        'contract_template_name': contractTemplateName,
+        'terms_override': _termsOverride,
+        // Verification — admin must approve via the web dashboard.
+        // is_verified stays false until an admin sets it to true.
+        'verification_doc_url': verificationDocPath,
+        'verification_submitted_at':
+            verificationDocPath != null && _verificationDoc != null
+            ? DateTime.now().toIso8601String()
+            : null,
+        'is_verified': false,
       };
 
       // listing_locations
       final location = <String, dynamic>{
-        'full_address': _fullAddressCtrl.text.isEmpty ? null : _fullAddressCtrl.text,
+        'full_address': _fullAddressCtrl.text.isEmpty
+            ? null
+            : _fullAddressCtrl.text,
         'barangay': _streetAreaCtrl.text.isEmpty ? null : _streetAreaCtrl.text,
         'city': _cityCtrl.text.isEmpty ? null : _cityCtrl.text,
         'province': _provinceCtrl.text.isEmpty ? null : _provinceCtrl.text,
-        'postal_code': _postalCodeCtrl.text.isEmpty ? null : _postalCodeCtrl.text,
+        'postal_code': _postalCodeCtrl.text.isEmpty
+            ? null
+            : _postalCodeCtrl.text,
+        'latitude': _mapPosition.latitude,
+        'longitude': _mapPosition.longitude,
       };
 
       // listing_details
@@ -2444,10 +3865,16 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
       // listing_financials
       final financials = <String, dynamic>{
         'monthly_rent': monthlyRent,
-        'security_deposit': double.tryParse(
-            _securityDepositCtrl.text.replaceAll(RegExp(r'[^\d.]'), '')) ?? 0,
-        'advance_payment': double.tryParse(
-            _advancePaymentCtrl.text.replaceAll(RegExp(r'[^\d.]'), '')) ?? 0,
+        'security_deposit':
+            double.tryParse(
+              _securityDepositCtrl.text.replaceAll(RegExp(r'[^\d.]'), ''),
+            ) ??
+            0,
+        'advance_payment':
+            double.tryParse(
+              _advancePaymentCtrl.text.replaceAll(RegExp(r'[^\d.]'), ''),
+            ) ??
+            0,
         'payment_terms': _paymentTerms,
         'payment_method': _paymentMethod,
       };
@@ -2520,6 +3947,42 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
           hostInfo: hostInfo,
         );
         success = listingId != null;
+        // Owning a listing flips the landlord capability flag.
+        // `role` stays as-is so the user can still act as a tenant.
+        if (success) {
+          try {
+            await Supabase.instance.client
+                .from('profiles')
+                .update({'is_landlord': true})
+                .eq('id', userId);
+          } catch (e) {
+            debugPrint('Promote to landlord failed: $e');
+          }
+        }
+      }
+
+      // Upload cover photo for NEW listings (deferred — real listingId now known).
+      // For edits, the upload already happened above.
+      if (success &&
+          listingId != null &&
+          _coverPhoto != null &&
+          widget.existingListingId == null) {
+        try {
+          final bytes = await _coverPhoto!.readAsBytes();
+          final ext = _coverPhoto!.name.split('.').last;
+          final fileName =
+              'cover_${DateTime.now().millisecondsSinceEpoch}.$ext';
+          final storagePath = '$listingId/$fileName';
+          await Supabase.instance.client.storage
+              .from('listing-images')
+              .uploadBinary(storagePath, bytes);
+          await Supabase.instance.client
+              .from('listings')
+              .update({'cover_photo_url': storagePath})
+              .eq('id', listingId);
+        } catch (e) {
+          debugPrint('Cover photo upload (new listing) failed: $e');
+        }
       }
 
       // Upload property images
@@ -2529,7 +3992,8 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
           final img = _propertyImages[i];
           final bytes = await img.readAsBytes();
           final ext = img.name.split('.').last;
-          final path = '$listingId/img_${i}_${DateTime.now().millisecondsSinceEpoch}.$ext';
+          final path =
+              '$listingId/img_${i}_${DateTime.now().millisecondsSinceEpoch}.$ext';
           try {
             await Supabase.instance.client.storage
                 .from('listing-images')
@@ -2540,8 +4004,40 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
           }
         }
         if (storagePaths.isNotEmpty) {
-          await saveListingImages(listingId, storagePaths,
-              imageType: 'normal', uploadSource: 'upload');
+          try {
+            await saveListingImages(
+              listingId,
+              storagePaths,
+              imageType: 'normal',
+              uploadSource: 'upload',
+            );
+          } catch (e) {
+            debugPrint('saveListingImages ERROR: $e');
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(
+                    'Listing saved, but images could not be recorded in the database: $e\n'
+                    'Please open the listing and re-upload images from Manage Photos.',
+                  ),
+                  backgroundColor: VxrTokens.warning,
+                  duration: const Duration(seconds: 8),
+                ),
+              );
+            }
+          }
+          // Bug fix: when no explicit cover photo was selected,
+          // use the first uploaded property image as the cover.
+          if (_coverPhoto == null) {
+            try {
+              await Supabase.instance.client
+                  .from('listings')
+                  .update({'cover_photo_url': storagePaths.first})
+                  .eq('id', listingId);
+            } catch (e) {
+              debugPrint('cover_photo_url update failed: $e');
+            }
+          }
         }
       }
 
@@ -2552,7 +4048,8 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
           final room = localRooms[i];
           final bytes = await room.localFile!.readAsBytes();
           final ext = room.localFile!.name.split('.').last;
-          final path = '$listingId/pano_${i}_${DateTime.now().millisecondsSinceEpoch}.$ext';
+          final path =
+              '$listingId/pano_${i}_${DateTime.now().millisecondsSinceEpoch}.$ext';
           try {
             await Supabase.instance.client.storage
                 .from('listing-images')
@@ -2574,9 +4071,11 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
         if (success) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text(widget.existingListingId != null
-                  ? 'Listing updated!'
-                  : 'Listing created!'),
+              content: Text(
+                widget.existingListingId != null
+                    ? 'Listing updated!'
+                    : 'Listing created!',
+              ),
             ),
           );
           Navigator.pop(context, true);
@@ -2589,9 +4088,9 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
     } catch (e) {
       debugPrint('_saveToSupabase ERROR: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error: $e')));
       }
     } finally {
       if (mounted) setState(() => _isSaving = false);
@@ -2763,7 +4262,6 @@ class _ListingMapAddressPickerState extends State<_ListingMapAddressPicker> {
   late LatLng _selectedPosition;
   String _address = 'Move the map to pick a location';
   bool _loadingAddress = false;
-  GoogleMapController? _mapController;
   Timer? _debounceTimer;
 
   // Parsed address components
@@ -2800,9 +4298,7 @@ class _ListingMapAddressPickerState extends State<_ListingMapAddressPicker> {
         '?latlng=${pos.latitude},${pos.longitude}'
         '&key=$_mapsApiKey',
       );
-      final response = await http.get(url).timeout(
-        const Duration(seconds: 10),
-      );
+      final response = await http.get(url).timeout(const Duration(seconds: 10));
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         if (data['status'] == 'OK' &&
@@ -2811,7 +4307,8 @@ class _ListingMapAddressPickerState extends State<_ListingMapAddressPicker> {
           final result = data['results'][0];
           _address = result['formatted_address'] ?? 'Unknown';
           _parseAddressComponents(
-              result['address_components'] as List<dynamic>);
+            result['address_components'] as List<dynamic>,
+          );
         } else {
           _address = 'No address found for this location';
         }
@@ -2869,7 +4366,9 @@ class _ListingMapAddressPickerState extends State<_ListingMapAddressPicker> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: kCoral,
+        flexibleSpace: const DecoratedBox(
+          decoration: BoxDecoration(gradient: VxrTokens.brandGradient),
+        ),
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.white),
@@ -2888,7 +4387,6 @@ class _ListingMapAddressPickerState extends State<_ListingMapAddressPicker> {
               target: _selectedPosition,
               zoom: 16,
             ),
-            onMapCreated: (controller) => _mapController = controller,
             onCameraMove: (position) {
               _selectedPosition = position.target;
             },
@@ -2901,11 +4399,7 @@ class _ListingMapAddressPickerState extends State<_ListingMapAddressPicker> {
           const Center(
             child: Padding(
               padding: EdgeInsets.only(bottom: 36),
-              child: Icon(
-                Icons.location_pin,
-                size: 48,
-                color: kCoral,
-              ),
+              child: Icon(Icons.location_pin, size: 48, color: kCoral),
             ),
           ),
           // Address bar at bottom
@@ -2946,9 +4440,10 @@ class _ListingMapAddressPickerState extends State<_ListingMapAddressPicker> {
                                     ),
                                   ),
                                   const SizedBox(width: 8),
-                                  Text('Getting address...',
-                                      style:
-                                          TextStyle(color: Colors.grey[600])),
+                                  Text(
+                                    'Getting address...',
+                                    style: TextStyle(color: Colors.grey[600]),
+                                  ),
                                 ],
                               )
                             : Text(
@@ -2970,7 +4465,7 @@ class _ListingMapAddressPickerState extends State<_ListingMapAddressPicker> {
                     Container(
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFF5F5F5),
+                        color: VxrTokens.bg,
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Column(
