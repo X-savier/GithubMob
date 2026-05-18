@@ -1,0 +1,71 @@
+---
+config:
+  theme: neutral
+  flowchart:
+    curve: basis
+    nodeSpacing: 35
+    rankSpacing: 70
+---
+flowchart LR
+  classDef actor fill:#FFE0B2,stroke:#C45A14,color:#2A1606,stroke-width:1.5px,font-weight:bold
+  classDef uc fill:#FFFFFF,stroke:#555,color:#1F1F1F,stroke-width:1px
+
+  T((Tenant))
+  L((Landlord))
+  A((Administrator))
+
+  class T,L,A actor
+
+  subgraph DIS [Property Discovery]
+    UC1([Browse Listings])
+    UC2([Search and Filter])
+    UC3([View 360 Panorama Tour])
+    UC4([Save to Wishlist])
+  end
+
+  subgraph RENT [Rental Process]
+    UC5([Submit Rental Application])
+    UC6([Review Application])
+    UC7([Sign Lease Contract])
+    UC8([Pay First Month via Stripe])
+  end
+
+  subgraph LIST [Listing Management]
+    UC9([Enlist Property])
+    UC10([Capture 360 Panorama])
+    UC11([Manage Property Images])
+    UC12([Generate Contract])
+  end
+
+  subgraph STAY [In-Stay Operations]
+    UC13([Send and Receive Messages])
+    UC14([File Maintenance Report])
+    UC15([Resolve Report])
+    UC16([Manage Active Tenants])
+    UC17([Process Move-out])
+  end
+
+  subgraph ADM [Administration]
+    UC18([Manage Users])
+    UC19([Moderate Listings])
+    UC20([Verify Identity Documents])
+    UC21([Publish Announcements])
+    UC22([Edit FAQ and Pages])
+  end
+
+  class UC1,UC2,UC3,UC4,UC5,UC6,UC7,UC8,UC9,UC10,UC11,UC12,UC13,UC14,UC15,UC16,UC17,UC18,UC19,UC20,UC21,UC22 uc
+
+  T --- DIS
+  T --- UC5
+  T --- UC7
+  T --- UC8
+  T --- UC13
+  T --- UC14
+  T --- UC17
+  L --- UC6
+  L --- LIST
+  L --- UC7
+  L --- UC13
+  L --- UC15
+  L --- UC16
+  A --- ADM

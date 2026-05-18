@@ -1,27 +1,61 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'state/notification_controller.dart';
+import 'theme/vxr_theme.dart';
+import 'theme/vxr_widgets.dart';
 import 'login_screen.dart';
-import 'signup_screen.dart'; 
+import 'signup_screen.dart';
 
 void main() async{
+  WidgetsFlutterBinding.ensureInitialized();
 
   await Supabase.initialize(
-    anonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndidmpzZmd5ZWt6c2Fsc3Z1bXZ5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEzNTM0OTksImV4cCI6MjA4NjkyOTQ5OX0.4aCDLhxzbwyF3m6tMXLNg65Nu3lV0pz1B0ZlBVD1C_I",
-    url: "https://wbvjsfgyekzsalsvumvy.supabase.co",
-
+    anonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1xc2R0Z3Z4eXJ2a29ybm5pZmVuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYyMzM5MDksImV4cCI6MjA5MTgwOTkwOX0.nKTYsvBh9I_64Aa25RluKye79eSIQwBpS8ExWuIiKRc",
+    url: "https://mqsdtgvxyrvkornnifen.supabase.co",
   );
 
   runApp(const MyApp());
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
 
   @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  late final NotificationController _notifications;
+
+  @override
+  void initState() {
+    super.initState();
+    _notifications = NotificationController();
+    final auth = Supabase.instance.client.auth;
+    _notifications.bind(auth.currentUser?.id);
+    auth.onAuthStateChange.listen((event) {
+      _notifications.bind(event.session?.user.id);
+    });
+  }
+
+  @override
+  void dispose() {
+    _notifications.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return const MaterialApp(
-      debugShowCheckedModeBanner: false,
-      home: LandingPage(),
+    return ChangeNotifierProvider<NotificationController>.value(
+      value: _notifications,
+      child: MaterialApp(
+        debugShowCheckedModeBanner: false,
+        theme: VxrTheme.lightThemeData(),
+        builder: (context, child) => VxrTheme(child: child!),
+        home: const LandingPage(),
+      ),
     );
   }
 }
@@ -31,112 +65,39 @@ class LandingPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = VxrTheme.of(context);
     return Scaffold(
+      backgroundColor: VxrTokens.bg,
       body: Column(
         children: [
-          /// TOP GRADIENT SECTION
+          /// ── TOP GRADIENT SECTION ───────────────────────────────
           Expanded(
-            flex: 5,
+            flex: 58,
             child: Container(
               width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 50),
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [Color(0xFFFF7043), Color(0xFFFF8A80)],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-              ),
+              padding: EdgeInsets.fromLTRB(
+                  24, MediaQuery.of(context).padding.top + 36, 24, 36),
+              decoration: const BoxDecoration(gradient: VxrTokens.brandGradient),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  /// Logo Row with Image
-                  Row(
-                    children: [
-                      /// Logo Image with Border Radius
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(
-                          15,
-                        ), // 15px border radius
-                        child: Image.asset(
-                          'assets/images/logo.jpg', // Make sure to add your logo image here
-                          width: 40,
-                          height: 40,
-                          fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) {
-                            // Fallback in case image is not found
-                            return Container(
-                              width: 40,
-                              height: 40,
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(15),
-                              ),
-                              child: const Center(
-                                child: Text(
-                                  "V",
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    color: Color(0xFFFF7043),
-                                  ),
-                                ),
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      const Text(
-                        "ViewxRent",
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
-                  ),
-
-                  const SizedBox(height: 40),
-
-                  const Text(
+                  const VxrLogoMark(onGradient: true, size: 18),
+                  const Spacer(),
+                  Text(
                     "Find Rental Homes\nMade Easy",
-                    style: TextStyle(
+                    style: GoogleFonts.plusJakartaSans(
                       color: Colors.white,
                       fontSize: 28,
-                      fontWeight: FontWeight.bold,
+                      fontWeight: FontWeight.w800,
+                      height: 1.15,
                     ),
                   ),
-
-                  const SizedBox(height: 15),
-
-                  const Text(
+                  const SizedBox(height: 12),
+                  Text(
                     "Discover your perfect home from thousands of rental listings.",
-                    style: TextStyle(color: Colors.white70, fontSize: 14),
-                  ),
-
-                  const SizedBox(height: 30),
-
-                  /// Search Field
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 15),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(12),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.1),
-                          blurRadius: 8,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
-                    ),
-                    child: const TextField(
-                      decoration: InputDecoration(
-                        icon: Icon(Icons.search),
-                        hintText: "Search location or property...",
-                        border: InputBorder.none,
-                      ),
+                    style: GoogleFonts.dmSans(
+                      color: Colors.white.withOpacity(0.80),
+                      fontSize: 14,
                     ),
                   ),
                 ],
@@ -144,32 +105,25 @@ class LandingPage extends StatelessWidget {
             ),
           ),
 
-          /// BOTTOM WHITE SECTION
+          /// ── BOTTOM WHITE SECTION ───────────────────────────────
           Expanded(
-            flex: 4,
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 30),
-              decoration: const BoxDecoration(
-                color: Color(0xFFF5F5F5),
-                borderRadius: BorderRadius.only(
-                  topLeft: Radius.circular(30),
-                  topRight: Radius.circular(30),
+            flex: 42,
+            child: Transform.translate(
+              offset: const Offset(0, -20),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
+                decoration: const BoxDecoration(
+                  color: VxrTokens.surface,
+                  borderRadius: BorderRadius.only(
+                    topLeft: Radius.circular(VxrTokens.radiusSheet),
+                    topRight: Radius.circular(VxrTokens.radiusSheet),
+                  ),
                 ),
-              ),
-              child: Column(
-                children: [
-                  /// Get Started Button
-                  SizedBox(
-                    width: double.infinity,
-                    height: 55,
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.redAccent,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                      ),
+                child: Column(
+                  children: [
+                    VxrPrimaryButton(
+                      label: "Get Started",
                       onPressed: () {
                         Navigator.push(
                           context,
@@ -178,76 +132,46 @@ class LandingPage extends StatelessWidget {
                           ),
                         );
                       },
-                      child: const Text(
-                        "Get Started",
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                        ),
-                      ),
                     ),
-                  ),
-
-                  const SizedBox(height: 15),
-
-                  /// Create Account Button - UPDATED
-                  SizedBox(
-                    width: double.infinity,
-                    height: 55,
-                    child: OutlinedButton(
-                      style: OutlinedButton.styleFrom(
-                        side: const BorderSide(color: Colors.redAccent),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                      ),
+                    const SizedBox(height: 12),
+                    VxrSecondaryButton(
+                      label: "Create Account",
                       onPressed: () {
                         Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (context) =>
-                                const SignUpScreen(), // Changed from LoginScreen to SignUpScreen
+                            builder: (context) => const SignUpScreen(),
                           ),
                         );
                       },
-                      child: const Text(
-                        "Create Account",
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.redAccent,
+                    ),
+                    const SizedBox(height: 24),
+                    Text(
+                      "WHY CHOOSE US",
+                      style: GoogleFonts.dmSans(
+                        fontSize: 11,
+                        color: t.textMuted,
+                        letterSpacing: 1.4,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    const Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceAround,
+                      children: [
+                        FeatureIcon(icon: Icons.search, label: "Easy Search"),
+                        FeatureIcon(
+                          icon: Icons.verified_outlined,
+                          label: "Verified Listings",
                         ),
-                      ),
+                        FeatureIcon(
+                          icon: Icons.lock_outline,
+                          label: "Secure Payments",
+                        ),
+                      ],
                     ),
-                  ),
-
-                  const SizedBox(height: 25),
-
-                  const Text(
-                    "WHY CHOOSE US",
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey,
-                      letterSpacing: 1.2,
-                    ),
-                  ),
-
-                  const SizedBox(height: 20),
-
-                  /// Features Row
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceAround,
-                    children: const [
-                      FeatureIcon(icon: Icons.search, label: "Easy Search"),
-                      FeatureIcon(
-                        icon: Icons.verified,
-                        label: "Verified Listings",
-                      ),
-                      FeatureIcon(icon: Icons.lock, label: "Secure Payments"),
-                    ],
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
@@ -265,15 +189,24 @@ class FeatureIcon extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = VxrTheme.of(context);
     return Column(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        CircleAvatar(
-          radius: 25,
-          backgroundColor: Colors.redAccent.withOpacity(0.2),
-          child: Icon(icon, color: Colors.redAccent),
+        Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            color: t.accentSoft,
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Icon(icon, color: t.accent, size: 20),
         ),
         const SizedBox(height: 8),
-        Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+        Text(
+          label,
+          style: GoogleFonts.dmSans(fontSize: 11, color: t.textSub),
+        ),
       ],
     );
   }

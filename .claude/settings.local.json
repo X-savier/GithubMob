@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(flutter analyze *)",
+      "Bash(git stash *)",
+      "Bash(flutter pub *)",
+      "Bash(curl -sSf -o regions.json     https://psgc.gitlab.io/api/regions/)",
+      "Bash(curl -sSf -o provinces.json   https://psgc.gitlab.io/api/provinces/)",
+      "Bash(curl -sSf -o cities.json      https://psgc.gitlab.io/api/cities-municipalities/)",
+      "Bash(curl -sSf -o barangays.json   https://psgc.gitlab.io/api/barangays/)",
+      "Bash(flutter test *)",
+      "Bash(ls \"C:\\\\Users\\\\PC\\\\Downloads\\\\Mobile Software Progress Test Case.docx\")",
+      "Read(//c/Users/PC/Downloads/**)",
+      "PowerShell($word = New-Object -ComObject Word.Application; $word.Visible = $false; $doc = $word.Documents.Open\\(\"C:\\\\Users\\\\PC\\\\Downloads\\\\Mobile Software Progress Test Case.docx\"\\); $text = $doc.Content.Text; $doc.Close\\(\\); $word.Quit\\(\\); $text)",
+      "Bash(python -c \"import docx; print\\(docx.__version__\\)\")",
+      "Bash(where pandoc *)",
+      "Bash(where python3 *)",
+      "Bash(py --version)"
+    ]
+  }
+}

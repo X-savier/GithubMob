@@ -1,0 +1,42 @@
+---
+config:
+  theme: neutral
+  flowchart:
+    curve: basis
+    nodeSpacing: 50
+    rankSpacing: 80
+---
+flowchart LR
+  classDef ent fill:#FFE0B2,stroke:#C45A14,color:#2A1606,stroke-width:1.5px,font-weight:bold
+  classDef sys fill:#1E5BBA,stroke:#0F2A52,color:#FFFFFF,stroke-width:2px,font-weight:bold
+  classDef ext fill:#E8E8E8,stroke:#555,color:#1F1F1F,stroke-width:1.2px
+
+  T((Tenant))
+  L((Landlord))
+  A((Administrator))
+  SYS[ViewXRent System<br/>Mobile and Web Clients<br/>+ Supabase Backend]
+  STRIPE[Stripe<br/>Payment Gateway]
+  GMAPS[Google Maps<br/>API]
+  GAUTH[Google OAuth<br/>Provider]
+
+  class T,L,A ent
+  class SYS sys
+  class STRIPE,GMAPS,GAUTH ext
+
+  T  ==>|account, search, applications, payments| SYS
+  SYS ==>|listings, contracts, receipts, chat| T
+
+  L  ==>|listings, image uploads, signatures, replies| SYS
+  SYS ==>|applications, payment records, reports| L
+
+  A  ==>|admin commands, CMS edits| SYS
+  SYS ==>|dashboards, audit data| A
+
+  SYS ==>|PaymentIntent request| STRIPE
+  STRIPE ==>|charge status, webhook| SYS
+
+  SYS ==>|location lookup, geocoding| GMAPS
+  GMAPS ==>|map tiles, coordinates| SYS
+
+  SYS ==>|OAuth token request| GAUTH
+  GAUTH ==>|user identity profile| SYS

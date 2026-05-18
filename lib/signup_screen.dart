@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:vxr_flutter/auth/auth_service.dart';
+import 'theme/vxr_theme.dart';
+import 'theme/vxr_widgets.dart';
 import 'login_screen.dart';
 
 class SignUpScreen extends StatefulWidget {
@@ -11,247 +14,277 @@ class SignUpScreen extends StatefulWidget {
 
 class _SignUpScreenState extends State<SignUpScreen> {
   bool isChecked = false;
-  bool hidePassword = true;
-  bool hideConfirmPassword = true;
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
- //get auth service
- final authService = AuthService();
+  bool _isLoading = false;
 
- // text Controllers
- final _emailController = TextEditingController();
- final _passwordController = TextEditingController();
- final _confirmPasswordController = TextEditingController();
+  final authService = AuthService();
 
- // sign up button pressed
- void signUp() async {
-    //prepare data
-    final email = _emailController.text;
+  final _fullNameController = TextEditingController();
+  final _emailController = TextEditingController();
+  final _phoneController = TextEditingController();
+  final _passwordController = TextEditingController();
+  final _confirmPasswordController = TextEditingController();
+
+  @override
+  void dispose() {
+    _fullNameController.dispose();
+    _emailController.dispose();
+    _phoneController.dispose();
+    _passwordController.dispose();
+    _confirmPasswordController.dispose();
+    super.dispose();
+  }
+
+  void signUp() async {
+    final fullName = _fullNameController.text.trim();
+    final email = _emailController.text.trim();
+    final phone = _phoneController.text.trim();
     final password = _passwordController.text;
     final confirmPassword = _confirmPasswordController.text;
 
-    //check password
+    if (fullName.isEmpty ||
+        email.isEmpty ||
+        phone.isEmpty ||
+        password.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Please fill in all fields")),
+      );
+      return;
+    }
+
     if (password != confirmPassword) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text("Password don't match")));
-          return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Passwords don't match")),
+      );
+      return;
     }
 
-    // attempt sign up..
+    if (!isChecked) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text("Please agree to the Terms of Service")),
+      );
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
     try {
-      await authService.signUpWithEmailPassword(email, password);
+      await authService.signUpWithEmailPassword(
+        email,
+        password,
+        fullName: fullName,
+        phone: phone,
+      );
 
-      Navigator.pop(context);
-    }
-
-    //catch errors
-    catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text("Error: $e")));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text(
+                  "Account created! Please check your email to verify.")),
+        );
+        Navigator.pop(context);
       }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Error: $e")),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
- }
- 
- 
- 
+  }
+
   @override
   Widget build(BuildContext context) {
+    final t = VxrTheme.of(context);
     return Scaffold(
-    resizeToAvoidBottomInset: true,
-    body: Container(
-      width: double.infinity,
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          colors: [Color(0xFFFF7043), Color(0xFFFF8A80)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-      ),
-      child: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            return SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(24, 20, 24, 20),
-              child: ConstrainedBox(
-                constraints: BoxConstraints(
-                  minHeight: constraints.maxHeight,
+      resizeToAvoidBottomInset: true,
+      body: Container(
+        width: double.infinity,
+        height: double.infinity,
+        decoration: const BoxDecoration(gradient: VxrTokens.brandGradient),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // ── Hero (gradient) ─────────────────────────────────
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                  24, MediaQuery.of(context).padding.top + 24, 24, 24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  GestureDetector(
+                    onTap: () => Navigator.pop(context),
+                    child: Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(Icons.arrow_back_ios_new,
+                          color: Colors.white, size: 16),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  const VxrLogoMark(onGradient: true, size: 18),
+                  const SizedBox(height: 24),
+                  Text(
+                    "Create Account",
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 28,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    "Sign up to get started",
+                    style: GoogleFonts.dmSans(
+                      fontSize: 13,
+                      color: Colors.white.withOpacity(0.75),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // ── White card slides up ────────────────────────────
+            Expanded(
+              child: Container(
+                width: double.infinity,
+                decoration: const BoxDecoration(
+                  color: VxrTokens.surface,
+                  borderRadius: BorderRadius.only(
+                    topLeft: Radius.circular(VxrTokens.radiusSheet),
+                    topRight: Radius.circular(VxrTokens.radiusSheet),
+                  ),
                 ),
-                child: IntrinsicHeight(
+                padding: const EdgeInsets.fromLTRB(24, 24, 24, 24),
+                child: SingleChildScrollView(
                   child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-
-                      /// Back Button
-                      IconButton(
-                        icon: const Icon(Icons.arrow_back, color: Colors.white),
-                        onPressed: () => Navigator.pop(context),
+                      VxrInputField(
+                        label: 'Full Name',
+                        hint: 'Enter your full name',
+                        prefixIcon: Icons.person_outline,
+                        controller: _fullNameController,
                       ),
-
-                      const SizedBox(height: 10),
-
-                      /// Logo Row
-                      Row(
-                        children: [
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(15),
-                            child: Image.asset(
-                              'assets/images/logo.jpg',
-                              width: 40,
-                              height: 40,
-                              fit: BoxFit.cover,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          const Text(
-                            "ViewxRent",
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 18,
-                            ),
-                          ),
-                        ],
-                      ),
-
-                      const SizedBox(height: 30),
-
-                      const Text(
-                        "Create Account",
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 26,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-
-                      const SizedBox(height: 8),
-
-                      const Text(
-                        "Sign up to get started",
-                        style: TextStyle(color: Colors.white70),
-                      ),
-
-                      const SizedBox(height: 30),
-
-                      /// EMAIL
-                      TextField(
+                      const SizedBox(height: 14),
+                      VxrInputField(
+                        label: 'Email Address',
+                        hint: 'Enter your email',
+                        prefixIcon: Icons.mail_outline,
                         controller: _emailController,
                         keyboardType: TextInputType.emailAddress,
-                        style: const TextStyle(color: Colors.white),
-                        decoration: _inputDecoration(
-                          "Email",
-                          "Enter your email",
-                          Icons.email,
-                        ),
                       ),
-
-                      const SizedBox(height: 15),
-
-                      /// PASSWORD
-                      TextField(
-                        controller: _passwordController,
+                      const SizedBox(height: 14),
+                      VxrInputField(
+                        label: 'Phone Number',
+                        hint: 'Enter your phone number',
+                        prefixIcon: Icons.phone_outlined,
+                        controller: _phoneController,
+                        keyboardType: TextInputType.phone,
+                      ),
+                      const SizedBox(height: 14),
+                      VxrInputField(
+                        label: 'Password',
+                        hint: 'Enter your password',
+                        prefixIcon: Icons.lock_outline,
                         obscureText: _obscurePassword,
-                        style: const TextStyle(color: Colors.white),
-                        decoration: _passwordDecoration(
-                          "Password",
-                          "Enter your password",
-                          _obscurePassword,
-                          () {
-                            setState(() {
-                              _obscurePassword = !_obscurePassword;
-                            });
-                          },
+                        controller: _passwordController,
+                        suffix: IconButton(
+                          icon: Icon(
+                            _obscurePassword
+                                ? Icons.visibility_off_outlined
+                                : Icons.visibility_outlined,
+                            size: 18,
+                            color: t.textMuted,
+                          ),
+                          onPressed: () => setState(
+                              () => _obscurePassword = !_obscurePassword),
                         ),
                       ),
-
-                      const SizedBox(height: 15),
-
-                      /// CONFIRM PASSWORD
-                      TextField(
-                        controller: _confirmPasswordController,
+                      const SizedBox(height: 14),
+                      VxrInputField(
+                        label: 'Confirm Password',
+                        hint: 'Confirm your password',
+                        prefixIcon: Icons.lock_outline,
                         obscureText: _obscureConfirmPassword,
-                        style: const TextStyle(color: Colors.white),
-                        decoration: _passwordDecoration(
-                          "Confirm Password",
-                          "Confirm your password",
-                          _obscureConfirmPassword,
-                          () {
-                            setState(() {
+                        controller: _confirmPasswordController,
+                        suffix: IconButton(
+                          icon: Icon(
+                            _obscureConfirmPassword
+                                ? Icons.visibility_off_outlined
+                                : Icons.visibility_outlined,
+                            size: 18,
+                            color: t.textMuted,
+                          ),
+                          onPressed: () => setState(() =>
                               _obscureConfirmPassword =
-                                  !_obscureConfirmPassword;
-                            });
-                          },
+                                  !_obscureConfirmPassword),
                         ),
                       ),
-
-                      const SizedBox(height: 15),
-
-                      /// TERMS CHECKBOX
+                      const SizedBox(height: 12),
                       Row(
                         children: [
-                          Checkbox(
-                            value: isChecked,
-                            onChanged: (value) {
-                              setState(() {
-                                isChecked = value!;
-                              });
-                            },
-                            activeColor: Colors.white,
-                            checkColor: Colors.deepOrange,
+                          SizedBox(
+                            width: 24,
+                            height: 24,
+                            child: Checkbox(
+                              value: isChecked,
+                              onChanged: (value) {
+                                setState(() => isChecked = value!);
+                              },
+                              activeColor: t.accent,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                            ),
                           ),
-                          const Expanded(
+                          const SizedBox(width: 10),
+                          Expanded(
                             child: Text(
                               "I agree to the Terms of Service and Privacy Policy",
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 12,
-                              ),
+                              style: GoogleFonts.dmSans(
+                                  color: t.textSub, fontSize: 12),
                             ),
                           ),
                         ],
                       ),
-
-                      const SizedBox(height: 15),
-
-                      /// CREATE BUTTON
-                      SizedBox(
-                        width: double.infinity,
-                        height: 50,
-                        child: ElevatedButton(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.white,
-                            foregroundColor: Colors.deepOrange,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                          ),
-                          onPressed: signUp,
-                          child: const Text(
-                            "Create Account",
-                            style: TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                        ),
+                      const SizedBox(height: 16),
+                      VxrPrimaryButton(
+                        label: 'Sign Up',
+                        onPressed: signUp,
+                        loading: _isLoading,
                       ),
-
-                      /// SIGN IN LINK
-                      Center(
-                        child: GestureDetector(
-                          onTap: () {
-                            Navigator.pushReplacement(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) =>
-                                    const LoginScreen(),
+                      const SizedBox(height: 24),
+                      GestureDetector(
+                        onTap: () {
+                          Navigator.pushReplacement(
+                            context,
+                            MaterialPageRoute(
+                                builder: (context) => const LoginScreen()),
+                          );
+                        },
+                        child: RichText(
+                          text: TextSpan(
+                            text: "Already have an account? ",
+                            style: GoogleFonts.dmSans(
+                                fontSize: 12, color: t.textSub),
+                            children: [
+                              TextSpan(
+                                text: "Sign In",
+                                style: GoogleFonts.dmSans(
+                                  fontSize: 12,
+                                  color: t.accent,
+                                  fontWeight: FontWeight.w700,
+                                ),
                               ),
-                            );
-                          },
-                          child: const Text(
-                            "Already have an account? Sign In",
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w500,
-                            ),
+                            ],
                           ),
                         ),
                       ),
@@ -259,142 +292,10 @@ class _SignUpScreenState extends State<SignUpScreen> {
                   ),
                 ),
               ),
-            );
-          },
-        ),
-      ),
-    ),
-  );
-}
-
-  Widget buildInput(String label, String hint, IconData icon) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label, style: const TextStyle(color: Colors.white)),
-        const SizedBox(height: 6),
-        TextField(
-          decoration: InputDecoration(
-            filled: true,
-            fillColor: Colors.white,
-            hintText: hint,
-            prefixIcon: Icon(icon),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide.none,
             ),
-          ),
+          ],
         ),
-      ],
-    );
-  }
-
-  Widget buildPasswordInput(String label, String hint, bool isMainPassword) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label, style: const TextStyle(color: Colors.white)),
-        const SizedBox(height: 6),
-        TextField(
-          obscureText: isMainPassword ? hidePassword : hideConfirmPassword,
-          decoration: InputDecoration(
-            filled: true,
-            fillColor: Colors.white,
-            hintText: hint,
-            prefixIcon: const Icon(Icons.lock),
-            suffixIcon: IconButton(
-              icon: Icon(
-                (isMainPassword ? hidePassword : hideConfirmPassword)
-                    ? Icons.visibility
-                    : Icons.visibility_off,
-              ),
-              onPressed: () {
-                setState(() {
-                  if (isMainPassword) {
-                    hidePassword = !hidePassword;
-                  } else {
-                    hideConfirmPassword = !hideConfirmPassword;
-                  }
-                });
-              },
-            ),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide.none,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget socialButton(String text, IconData icon) {
-    return SizedBox(
-      width: double.infinity,
-      height: 50,
-      child: ElevatedButton.icon(
-        style: ElevatedButton.styleFrom(
-          backgroundColor: Colors.white,
-          foregroundColor: Colors.black87,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-        ),
-        onPressed: () {},
-        icon: Icon(icon),
-        label: Text(text),
       ),
     );
   }
-
-  InputDecoration _inputDecoration(
-    String label, String hint, IconData icon) {
-  return InputDecoration(
-    labelText: label,
-    hintText: hint,
-    labelStyle: const TextStyle(color: Colors.white),
-    hintStyle: const TextStyle(color: Colors.white70),
-    prefixIcon: Icon(icon, color: Colors.white),
-    enabledBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(12),
-      borderSide: const BorderSide(color: Colors.white),
-    ),
-    focusedBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(12),
-      borderSide: const BorderSide(color: Colors.white, width: 2),
-    ),
-    contentPadding: const EdgeInsets.symmetric(vertical: 16),
-  );
-}
-
-InputDecoration _passwordDecoration(
-    String label,
-    String hint,
-    bool obscure,
-    VoidCallback toggle) {
-  return InputDecoration(
-    labelText: label,
-    hintText: hint,
-    labelStyle: const TextStyle(color: Colors.white),
-    hintStyle: const TextStyle(color: Colors.white70),
-    prefixIcon: const Icon(Icons.lock, color: Colors.white),
-    suffixIcon: IconButton(
-      icon: Icon(
-        obscure ? Icons.visibility_off : Icons.visibility,
-        color: Colors.white,
-      ),
-      onPressed: toggle,
-    ),
-    enabledBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(12),
-      borderSide: const BorderSide(color: Colors.white),
-    ),
-    focusedBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(12),
-      borderSide: const BorderSide(color: Colors.white, width: 2),
-    ),
-    contentPadding: const EdgeInsets.symmetric(vertical: 16),
-  );
-}
-
 }

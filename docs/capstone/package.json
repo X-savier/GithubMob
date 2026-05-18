@@ -1,0 +1,16 @@
+{
+  "name": "vxr-capstone-docs",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Generator for ViewXRent capstone Chapter 3 & 4 .docx files",
+  "scripts": {
+    "diagrams": "node render-diagrams.mjs",
+    "build": "npm run diagrams && node generate.mjs",
+    "docx": "node generate.mjs"
+  },
+  "devDependencies": {
+    "@mermaid-js/mermaid-cli": "^11.4.2",
+    "docx": "^9.0.0"
+  }
+}

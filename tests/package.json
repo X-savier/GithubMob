@@ -1,0 +1,22 @@
+{
+  "name": "vxr-integration-tests",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared integration-test harness for ViewXRent (Flutter mobile + React web). Seeds the test Supabase project and runs cross-platform contract tests.",
+  "scripts": {
+    "seed": "tsx fixtures/seed.ts",
+    "teardown": "tsx fixtures/seed.ts --teardown",
+    "test:contract": "vitest run contract"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.104.0",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.5",
+    "@types/node": "^22.9.0"
+  }
+}

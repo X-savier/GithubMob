@@ -43,3 +43,16 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Build-time secrets (PayMongo publishable key, mock flag)
+dart_defines.json
+dart_defines.*.json
+!dart_defines.example.json
+
+# Integration test harness
+tests/node_modules/
+tests/.env.test
+tests/.env.test.json
+tools/.dart_tool/
+tools/pubspec.lock
+tools/.packages
