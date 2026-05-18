@@ -797,18 +797,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
               },
             ),
           ],
-          _buildDivider(),
-          _buildMenuItem(
-            icon: Icons.assignment_outlined,
-            title: 'My Applications',
-            subtitle: 'Track approvals & contracts',
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const MyApplicationsScreen()),
-              );
-            },
-          ),
+          if (!_hasListings || _hasRental) ...[
+            _buildDivider(),
+            _buildMenuItem(
+              icon: Icons.assignment_outlined,
+              title: 'My Applications',
+              subtitle: 'Track approvals & contracts',
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) => const MyApplicationsScreen()),
+                );
+              },
+            ),
+          ],
           if (_hasRental || _hasListings) ...[
             _buildDivider(),
             _buildMenuItem(

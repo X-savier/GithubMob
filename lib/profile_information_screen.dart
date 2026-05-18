@@ -579,11 +579,12 @@ class _ProfileInformationScreenState extends State<ProfileInformationScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: VxrTokens.bg,
-      appBar: AppBar(
-        flexibleSpace: const DecoratedBox(
-          decoration: BoxDecoration(gradient: VxrTokens.brandGradient),
+      appBar: VxrAppBar(
+        title: 'Profile Information',
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
         ),
-        title: const Text('Profile Information'),
       ),
       body: _loading
           ? const Center(

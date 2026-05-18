@@ -63,8 +63,7 @@ class _RentalApplicationScreenState extends State<RentalApplicationScreen>
   // Step 4 — Proof of income only (no in-form ID upload)
   XFile? _incomeProofFile;
 
-  // Step 5 — Two consents (no signature pad, no separate date field)
-  bool _consentIdentity = false;
+  // Step 5 — Data privacy consent (identity verified separately)
   bool _consentDataPrivacy = false;
 
   bool _isSubmitting = false;
@@ -124,6 +123,10 @@ class _RentalApplicationScreenState extends State<RentalApplicationScreen>
         if (_firstTimeRenter == 'Yes') return true;
         return _step3Key.currentState?.validate() ?? false;
       case 3:
+        // Skip the proof-of-income gate for applicants without an employer
+        // (Unemployed / Student / Retired) — they shouldn't have to upload
+        // a payslip they can't produce.
+        if (kIncomeNoDetails.contains(_employmentStatus)) return true;
         if (_incomeProofFile == null) {
           _snack('Please upload your proof of income.');
           return false;
@@ -132,8 +135,8 @@ class _RentalApplicationScreenState extends State<RentalApplicationScreen>
       case 4:
         final ok = _step5Key.currentState?.validate() ?? false;
         if (!ok) return false;
-        if (!_consentIdentity || !_consentDataPrivacy) {
-          _snack('Please confirm both consent statements to submit.');
+        if (!_consentDataPrivacy) {
+          _snack('Please confirm the consent statement to submit.');
           return false;
         }
         return true;
@@ -142,12 +145,24 @@ class _RentalApplicationScreenState extends State<RentalApplicationScreen>
     }
   }
 
+  bool get _skipsIncomeStep =>
+      kIncomeNoDetails.contains(_employmentStatus);
+
   void _nextStep() {
     if (!_validateStep(_currentStep)) return;
+    // Hop over Step 4 (Proof of Income) when the applicant has no employer.
+    if (_currentStep == 2 && _skipsIncomeStep) {
+      _animateToStep(4);
+      return;
+    }
     if (_currentStep < 4) _animateToStep(_currentStep + 1);
   }
 
   void _prevStep() {
+    if (_currentStep == 4 && _skipsIncomeStep) {
+      _animateToStep(2);
+      return;
+    }
     if (_currentStep > 0) _animateToStep(_currentStep - 1);
   }
 
@@ -227,9 +242,9 @@ class _RentalApplicationScreenState extends State<RentalApplicationScreen>
         'landlord_contact':
             isFirstTime ? null : _trimOrNull(_landlordContactCtrl.text),
         // Step 5
-        'agreed_to_declaration': _consentIdentity,
+        'agreed_to_declaration': _consentDataPrivacy,
         'declaration_name': fullName.isEmpty ? null : fullName,
-        'declaration_date': _consentIdentity ? today : null,
+        'declaration_date': _consentDataPrivacy ? today : null,
       };
 
       final result = await submitRentalApplicationV2(
@@ -240,28 +255,32 @@ class _RentalApplicationScreenState extends State<RentalApplicationScreen>
 
       // Upload proof of income to the private application-documents bucket.
       // Path: {userId}/{ts}-income_proof-{safeName}
-      try {
-        final file = _incomeProofFile!;
-        final bytes = await file.readAsBytes();
-        final ts = DateTime.now().millisecondsSinceEpoch;
-        final safe =
-            file.name.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
-        final path = '$userId/$ts-income_proof-$safe';
-        await Supabase.instance.client.storage
-            .from('application-documents')
-            .uploadBinary(path, bytes);
+      // Applicants without an employer (Unemployed / Student / Retired) skip
+      // Step 4 and may not have a file to upload — guard against that.
+      if (_incomeProofFile != null) {
+        try {
+          final file = _incomeProofFile!;
+          final bytes = await file.readAsBytes();
+          final ts = DateTime.now().millisecondsSinceEpoch;
+          final safe =
+              file.name.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
+          final path = '$userId/$ts-income_proof-$safe';
+          await Supabase.instance.client.storage
+              .from('application-documents')
+              .uploadBinary(path, bytes);
 
-        await saveApplicationDocuments(result.id, [
-          {
-            'document_type': 'proof_of_income',
-            'url': path,
-            'file_name': file.name,
-          },
-        ]);
-      } catch (e) {
-        debugPrint('income proof upload failed: $e');
-        _snack('Application submitted, but uploading proof of income failed: $e',
-            isError: true);
+          await saveApplicationDocuments(result.id, [
+            {
+              'document_type': 'proof_of_income',
+              'url': path,
+              'file_name': file.name,
+            },
+          ]);
+        } catch (e) {
+          debugPrint('income proof upload failed: $e');
+          _snack('Application submitted, but uploading proof of income failed: $e',
+              isError: true);
+        }
       }
 
       if (!mounted) return;
@@ -328,8 +347,11 @@ class _RentalApplicationScreenState extends State<RentalApplicationScreen>
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
+        flexibleSpace: const DecoratedBox(
+          decoration: BoxDecoration(gradient: VxrTokens.brandGradient),
+        ),
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: VxrTokens.text),
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
           onPressed: () {
             if (_currentStep > 0) {
               _prevStep();
@@ -343,7 +365,7 @@ class _RentalApplicationScreenState extends State<RentalApplicationScreen>
           style: TextStyle(
             fontSize: 18,
             fontWeight: FontWeight.w600,
-            color: VxrTokens.text,
+            color: Colors.white,
           ),
         ),
         centerTitle: true,
@@ -443,9 +465,6 @@ class _RentalApplicationScreenState extends State<RentalApplicationScreen>
         return _Step5Declaration(
           formKey: _step5Key,
           fullName: _fullNameCtrl.text,
-          consentIdentity: _consentIdentity,
-          onConsentIdentityChanged: (v) =>
-              setState(() => _consentIdentity = v ?? false),
           consentDataPrivacy: _consentDataPrivacy,
           onConsentDataPrivacyChanged: (v) =>
               setState(() => _consentDataPrivacy = v ?? false),
@@ -1061,8 +1080,6 @@ class _Step4ProofOfIncomeState extends State<_Step4ProofOfIncome> {
 class _Step5Declaration extends StatelessWidget {
   final GlobalKey<FormState> formKey;
   final String fullName;
-  final bool consentIdentity;
-  final ValueChanged<bool?> onConsentIdentityChanged;
   final bool consentDataPrivacy;
   final ValueChanged<bool?> onConsentDataPrivacyChanged;
   final bool isSubmitting;
@@ -1071,8 +1088,6 @@ class _Step5Declaration extends StatelessWidget {
   const _Step5Declaration({
     required this.formKey,
     required this.fullName,
-    required this.consentIdentity,
-    required this.onConsentIdentityChanged,
     required this.consentDataPrivacy,
     required this.onConsentDataPrivacyChanged,
     required this.isSubmitting,
@@ -1141,20 +1156,6 @@ class _Step5Declaration extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 16),
-                CheckboxListTile(
-                  value: consentIdentity,
-                  onChanged: onConsentIdentityChanged,
-                  controlAffinity: ListTileControlAffinity.leading,
-                  contentPadding: EdgeInsets.zero,
-                  activeColor: VxrTokens.accent,
-                  title: const Text(
-                    'I consent to identity verification and authorize the landlord to verify the documents I have submitted.',
-                    style: TextStyle(
-                        fontSize: 13,
-                        color: VxrTokens.text,
-                        height: 1.45),
-                  ),
-                ),
                 CheckboxListTile(
                   value: consentDataPrivacy,
                   onChanged: onConsentDataPrivacyChanged,

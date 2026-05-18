@@ -102,11 +102,14 @@ class _AddPaymentMethodModalState extends State<AddPaymentMethodModal> {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
+      padding:
+          EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
           Center(
             child: Container(
               width: 40,
@@ -201,6 +204,7 @@ class _AddPaymentMethodModalState extends State<AddPaymentMethodModal> {
             onPressed: _saving ? null : _submit,
           ),
         ],
+        ),
       ),
     );
   }

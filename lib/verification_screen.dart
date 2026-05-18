@@ -137,9 +137,12 @@ class _VerificationScreenState extends State<VerificationScreen> {
       child: Scaffold(
         backgroundColor: _bg,
         appBar: AppBar(
-          backgroundColor: _coral,
+          backgroundColor: Colors.transparent,
           foregroundColor: Colors.white,
           elevation: 0,
+          flexibleSpace: const DecoratedBox(
+            decoration: BoxDecoration(gradient: VxrTokens.brandGradient),
+          ),
           title: const Text(
             'Verify Your Identity',
             style: TextStyle(fontWeight: FontWeight.bold),
@@ -825,9 +828,12 @@ class _VerificationPendingScreenState extends State<VerificationPendingScreen> {
     return Scaffold(
       backgroundColor: _bg,
       appBar: AppBar(
-        backgroundColor: _coral,
+        backgroundColor: Colors.transparent,
         foregroundColor: Colors.white,
         elevation: 0,
+        flexibleSpace: const DecoratedBox(
+          decoration: BoxDecoration(gradient: VxrTokens.brandGradient),
+        ),
         title: const Text(
           'Verification Pending',
           style: TextStyle(fontWeight: FontWeight.bold),

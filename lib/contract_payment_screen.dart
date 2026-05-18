@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
+import 'in_stay_dashboard_screen.dart';
 import 'services/paymongo.dart';
 import 'services/payments_service.dart';
 import 'services/payment_methods_service.dart';
@@ -17,6 +18,23 @@ const String _kReturnUrl = 'https://viewxrent.app/payment-return';
 
 const List<String> _kEwalletTypes = ['gcash', 'paymaya', 'grab_pay'];
 
+const List<String> _kMonthNames = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
+
+/// Format a 'YYYY-MM' / 'YYYY-MM-DD' billing month for UI display
+/// (e.g. '2026-05-01' → 'May 2026'). Returns null when the input is
+/// malformed.
+String? _formatBillingMonth(String raw) {
+  final m = RegExp(r'^(\d{4})-(\d{2})').firstMatch(raw);
+  if (m == null) return null;
+  final year = int.tryParse(m.group(1)!);
+  final month = int.tryParse(m.group(2)!);
+  if (year == null || month == null || month < 1 || month > 12) return null;
+  return '${_kMonthNames[month - 1]} $year';
+}
+
 enum _Step { form, processing, success }
 
 class ContractPaymentScreen extends StatefulWidget {
@@ -27,6 +45,11 @@ class ContractPaymentScreen extends StatefulWidget {
   final int? securityDeposit;
   final int? advancePayment;
 
+  /// Pass `'YYYY-MM'` or `'YYYY-MM-DD'` to charge a single month's rent
+  /// (recurring). Leave null for the move-in payment (rent + deposit +
+  /// advance, status-flipping).
+  final String? billingMonth;
+
   const ContractPaymentScreen({
     super.key,
     required this.contractId,
@@ -35,7 +58,10 @@ class ContractPaymentScreen extends StatefulWidget {
     this.monthlyRent,
     this.securityDeposit,
     this.advancePayment,
+    this.billingMonth,
   });
+
+  bool get isMonthly => billingMonth != null && billingMonth!.isNotEmpty;
 
   @override
   State<ContractPaymentScreen> createState() => _ContractPaymentScreenState();
@@ -78,7 +104,8 @@ class _ContractPaymentScreenState extends State<ContractPaymentScreen> {
   Future<void> _bootstrap() async {
     _selectedSaved = null;
     final results = await Future.wait([
-      createPaymongoPaymentIntent(widget.contractId),
+      createPaymongoPaymentIntent(widget.contractId,
+          billingMonth: widget.billingMonth),
       listMyPaymentMethods(),
     ]);
     if (!mounted) return;
@@ -277,10 +304,15 @@ class _ContractPaymentScreenState extends State<ContractPaymentScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final monthLabel = widget.isMonthly
+        ? _formatBillingMonth(widget.billingMonth!)
+        : null;
     return Scaffold(
       backgroundColor: VxrTokens.bg,
       appBar: VxrAppBar(
-        title: 'Pay your move-in',
+        title: widget.isMonthly
+            ? 'Pay rent for ${monthLabel ?? widget.billingMonth}'
+            : 'Pay your move-in',
         subtitle: widget.listingTitle ?? 'Secure checkout',
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.white),
@@ -293,7 +325,8 @@ class _ContractPaymentScreenState extends State<ContractPaymentScreen> {
                 amount: _total,
                 intentId: _successPaymentIntentId ?? '',
                 listingTitle: widget.listingTitle,
-                onDone: () => Navigator.of(context).pop(true),
+                isMonthly: widget.isMonthly,
+                monthLabel: monthLabel,
               )
             : ListView(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
@@ -304,6 +337,8 @@ class _ContractPaymentScreenState extends State<ContractPaymentScreen> {
                     securityDeposit: widget.securityDeposit ?? 0,
                     advancePayment: widget.advancePayment ?? 0,
                     total: _total,
+                    isMonthly: widget.isMonthly,
+                    monthLabel: monthLabel,
                   ),
                   const SizedBox(height: 16),
                   if (_intent == null && _error != null)
@@ -422,12 +457,16 @@ class _OrderSummaryCard extends StatelessWidget {
   final int securityDeposit;
   final int advancePayment;
   final int total;
+  final bool isMonthly;
+  final String? monthLabel;
   const _OrderSummaryCard({
     required this.listingTitle,
     required this.monthlyRent,
     required this.securityDeposit,
     required this.advancePayment,
     required this.total,
+    this.isMonthly = false,
+    this.monthLabel,
   });
 
   @override
@@ -454,11 +493,20 @@ class _OrderSummaryCard extends StatelessWidget {
             ),
             const SizedBox(height: 8),
           ],
-          _row('First month rent', monthlyRent),
-          _row('Security deposit', securityDeposit),
-          _row('Advance rent', advancePayment),
-          const Divider(height: 18, color: VxrTokens.border),
-          _row('Total', total, bold: true),
+          if (isMonthly) ...[
+            _row(
+              monthLabel == null ? 'Monthly rent' : 'Rent for $monthLabel',
+              total,
+            ),
+            const Divider(height: 18, color: VxrTokens.border),
+            _row('Total', total, bold: true),
+          ] else ...[
+            _row('First month rent', monthlyRent),
+            _row('Security deposit', securityDeposit),
+            _row('Advance rent', advancePayment),
+            const Divider(height: 18, color: VxrTokens.border),
+            _row('Total', total, bold: true),
+          ],
         ],
       ),
     );
@@ -844,12 +892,14 @@ class _SuccessView extends StatelessWidget {
   final int amount;
   final String intentId;
   final String? listingTitle;
-  final VoidCallback onDone;
+  final bool isMonthly;
+  final String? monthLabel;
   const _SuccessView({
     required this.amount,
     required this.intentId,
     required this.listingTitle,
-    required this.onDone,
+    this.isMonthly = false,
+    this.monthLabel,
   });
 
   @override
@@ -873,13 +923,25 @@ class _SuccessView extends StatelessWidget {
           const SizedBox(height: 16),
           Center(
             child: Text(
-              'Payment successful',
+              isMonthly ? 'Rent payment received' : 'Payment successful',
               style: GoogleFonts.plusJakartaSans(
                 fontSize: 22, fontWeight: FontWeight.w800,
                 color: VxrTokens.text,
               ),
             ),
           ),
+          if (isMonthly && monthLabel != null) ...[
+            const SizedBox(height: 4),
+            Center(
+              child: Text(
+                'for $monthLabel',
+                style: GoogleFonts.dmSans(
+                  fontSize: 13,
+                  color: VxrTokens.textSub,
+                ),
+              ),
+            ),
+          ],
           const SizedBox(height: 6),
           Center(
             child: Text(
@@ -910,7 +972,34 @@ class _SuccessView extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 22),
-          VxrPrimaryButton(label: 'Done', onPressed: onDone),
+          VxrPrimaryButton(
+            label: 'Go to In-Stay Dashboard',
+            icon: Icons.home_work_outlined,
+            onPressed: () {
+              Navigator.of(context).pushAndRemoveUntil(
+                MaterialPageRoute(
+                  builder: (_) => const InStayDashboardScreen(),
+                ),
+                (route) => route.isFirst,
+              );
+            },
+          ),
+          const SizedBox(height: 10),
+          OutlinedButton.icon(
+            onPressed: () {
+              Navigator.of(context).popUntil((route) => route.isFirst);
+            },
+            icon: const Icon(Icons.home_rounded, size: 18),
+            label: const Text('Done'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: VxrTokens.accent,
+              side: const BorderSide(color: VxrTokens.accent),
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(VxrTokens.radius),
+              ),
+            ),
+          ),
         ],
       ),
     );

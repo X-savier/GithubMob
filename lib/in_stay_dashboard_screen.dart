@@ -7,6 +7,7 @@ import 'contract_payment_screen.dart';
 import 'payment_screen.dart';
 import 'property_data.dart';
 import 'report_management_screen.dart';
+import 'services/payments_service.dart';
 
 /// Tenant in-stay dashboard. Lands here once a contract is paid.
 ///
@@ -41,6 +42,7 @@ class _InStayDashboardScreenState extends State<InStayDashboardScreen> {
   Map<String, dynamic>? _rental;
   Map<String, dynamic>? _termination;
   List<Map<String, dynamic>> _recentReports = [];
+  List<RentMonth> _rentMonths = const [];
 
   @override
   void initState() {
@@ -57,8 +59,10 @@ class _InStayDashboardScreenState extends State<InStayDashboardScreen> {
     if (!mounted) return;
     final rental = results[0] as Map<String, dynamic>?;
     Map<String, dynamic>? termination;
+    List<RentMonth> rentMonths = const [];
     if (rental != null) {
       termination = await getTermination(rental['id'].toString());
+      rentMonths = await fetchRentMonths(rental['id'].toString());
     }
     setState(() {
       _rental = rental;
@@ -66,6 +70,7 @@ class _InStayDashboardScreenState extends State<InStayDashboardScreen> {
       _recentReports = (results[1] as List<Map<String, dynamic>>)
           .take(3)
           .toList();
+      _rentMonths = rentMonths;
       _loading = false;
     });
   }
@@ -263,6 +268,8 @@ class _InStayDashboardScreenState extends State<InStayDashboardScreen> {
                                     _quickActions(context),
                                     const SizedBox(height: 18),
                                     _leaseDetailsCard(),
+                                    const SizedBox(height: 18),
+                                    _rentHistorySection(),
                                     const SizedBox(height: 18),
                                     _recentReportsSection(context),
                                   ],
@@ -999,6 +1006,135 @@ class _InStayDashboardScreenState extends State<InStayDashboardScreen> {
     );
   }
 
+  // ── Rent history strip ────────────────────────────────────────────
+
+  Widget _rentHistorySection() {
+    if (_rentMonths.isEmpty) return const SizedBox.shrink();
+    const monthShort = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    ];
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: _surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: _border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 4,
+                height: 16,
+                decoration: BoxDecoration(
+                  color: _brand,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(width: 8),
+              const Text('Rent history',
+                  style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                      color: _ink)),
+            ],
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Tap an unpaid month to pay.',
+            style: TextStyle(fontSize: 12, color: _muted),
+          ),
+          const SizedBox(height: 12),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: _rentMonths.reversed.map((m) {
+                final label =
+                    '${monthShort[m.billingMonth.month - 1]} ${m.billingMonth.year}';
+                final color = m.paid ? _success : _warn;
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: InkWell(
+                    onTap: m.paid
+                        ? null
+                        : () => _payMonth(m),
+                    borderRadius: BorderRadius.circular(10),
+                    child: Container(
+                      width: 96,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: color.withValues(alpha: 0.10),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                            color: color.withValues(alpha: 0.4)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            label,
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w800,
+                              color: color,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            '₱${(m.amountCents / 100).toStringAsFixed(0)}',
+                            style: const TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: _ink,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            m.paid ? 'Paid' : 'Unpaid',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w800,
+                              color: color,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _payMonth(RentMonth m) async {
+    if (_rental == null) return;
+    final ym =
+        '${m.billingMonth.year.toString().padLeft(4, '0')}-${m.billingMonth.month.toString().padLeft(2, '0')}';
+    final rentPhp = (m.amountCents / 100).round();
+    final listing = (_rental?['listings'] as Map?) ?? const {};
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ContractPaymentScreen(
+          contractId: _rental!['id'].toString(),
+          amountPhp: rentPhp,
+          monthlyRent: rentPhp,
+          listingTitle: listing['title']?.toString(),
+          billingMonth: ym,
+        ),
+      ),
+    );
+    _refresh();
+  }
+
   // ── Recent reports ────────────────────────────────────────────────
 
   Widget _recentReportsSection(BuildContext context) {
@@ -1168,6 +1304,7 @@ class _InStayDashboardScreenState extends State<InStayDashboardScreen> {
                 child: ElevatedButton(
                   onPressed: () async {
                     if (reasonCtrl.text.trim().isEmpty) return;
+                    final messenger = ScaffoldMessenger.of(context);
                     Navigator.pop(ctx);
                     final now = DateTime.now();
                     final effectiveDate =
@@ -1181,7 +1318,15 @@ class _InStayDashboardScreenState extends State<InStayDashboardScreen> {
                       reason: reasonCtrl.text.trim(),
                       securityDepositAmount: depositAmt,
                     );
-                    if (ok && mounted) _refresh();
+                    if (!mounted) return;
+                    if (ok) {
+                      _refresh();
+                    } else {
+                      messenger.showSnackBar(const SnackBar(
+                        content: Text(
+                            'Could not initiate termination — please refresh and try again.'),
+                      ));
+                    }
                   },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: _danger,

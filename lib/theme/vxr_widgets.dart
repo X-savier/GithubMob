@@ -192,9 +192,9 @@ class VxrSearchBar extends StatelessWidget {
     final t = VxrTheme.of(context);
     // On gradient: nearly-opaque white pill for clean contrast against the
     // coral header (the previous translucent fill looked muddy).
-    final fill = onGradient ? Colors.white.withOpacity(0.96) : Colors.white;
+    final fill = onGradient ? Colors.white.withOpacity(0.96) : t.surface2;
     final border =
-        onGradient ? Colors.white.withOpacity(0.0) : t.border;
+        onGradient ? Colors.white.withOpacity(0.0) : Colors.transparent;
     final iconColor = onGradient ? t.accent : t.textMuted;
     final hintColor = onGradient ? t.textMuted : t.textMuted;
     final textColor = onGradient ? t.text : t.text;
@@ -204,7 +204,6 @@ class VxrSearchBar extends StatelessWidget {
         color: fill,
         borderRadius: BorderRadius.circular(VxrTokens.radiusPill),
         border: Border.all(color: border),
-        boxShadow: VxrTokens.shadowSm,
       ),
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Row(
@@ -219,6 +218,7 @@ class VxrSearchBar extends StatelessWidget {
               decoration: InputDecoration(
                 hintText: hint,
                 hintStyle: GoogleFonts.dmSans(fontSize: 13, color: hintColor),
+                filled: false,
                 border: InputBorder.none,
                 isDense: true,
                 contentPadding: const EdgeInsets.symmetric(vertical: 12),

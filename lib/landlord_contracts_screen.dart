@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'theme/vxr_theme.dart';
+import 'theme/vxr_widgets.dart';
 import 'contract_view_screen.dart';
 import 'property_data.dart';
 
@@ -42,26 +43,29 @@ class _LandlordContractsScreenState extends State<LandlordContractsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: VxrTokens.bg,
-      appBar: AppBar(
-        flexibleSpace: const DecoratedBox(
-          decoration: BoxDecoration(gradient: VxrTokens.brandGradient),
+      appBar: VxrAppBar(
+        title: 'Tenant Contracts',
+        subtitle: 'Manage signed leases & lease status',
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
         ),
-        title: const Text('Tenant Contracts'),
       ),
       body: _loading
           ? const Center(
-              child: CircularProgressIndicator(color: VxrTokens.accent))
+              child: CircularProgressIndicator(color: VxrTokens.accent),
+            )
           : _rows.isEmpty
-              ? _emptyState()
-              : RefreshIndicator(
-                  onRefresh: _refresh,
-                  child: ListView.separated(
-                    padding: const EdgeInsets.all(12),
-                    itemCount: _rows.length,
-                    separatorBuilder: (_, _) => const SizedBox(height: 8),
-                    itemBuilder: (_, i) => _row(_rows[i]),
-                  ),
-                ),
+          ? _emptyState()
+          : RefreshIndicator(
+              onRefresh: _refresh,
+              child: ListView.separated(
+                padding: const EdgeInsets.all(12),
+                itemCount: _rows.length,
+                separatorBuilder: (_, _) => const SizedBox(height: 8),
+                itemBuilder: (_, i) => _row(_rows[i]),
+              ),
+            ),
     );
   }
 
@@ -70,14 +74,20 @@ class _LandlordContractsScreenState extends State<LandlordContractsScreen> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(Icons.assignment_outlined,
-              size: 56, color: VxrTokens.textMuted),
+          const Icon(
+            Icons.assignment_outlined,
+            size: 56,
+            color: VxrTokens.textMuted,
+          ),
           const SizedBox(height: 12),
-          Text('No contracts yet',
-              style: GoogleFonts.plusJakartaSans(
-                  color: VxrTokens.text,
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700)),
+          Text(
+            'No contracts yet',
+            style: GoogleFonts.plusJakartaSans(
+              color: VxrTokens.text,
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
           const SizedBox(height: 4),
           Text(
             'Approve a tenant application and the contract will appear here.',
@@ -109,8 +119,7 @@ class _LandlordContractsScreenState extends State<LandlordContractsScreen> {
     };
 
     final canOpen = applicationId != null && listingId != null;
-    final landlordId =
-        Supabase.instance.client.auth.currentUser?.id ?? '';
+    final landlordId = Supabase.instance.client.auth.currentUser?.id ?? '';
 
     return Material(
       color: VxrTokens.surface,
@@ -150,33 +159,40 @@ class _LandlordContractsScreenState extends State<LandlordContractsScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            fontWeight: FontWeight.w600, fontSize: 14)),
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 14,
+                      ),
+                    ),
                     const SizedBox(height: 4),
                     Text(
                       tenantName.isEmpty ? 'Tenant' : 'Tenant: $tenantName',
-                      style: const TextStyle(
-                          fontSize: 12, color: Colors.grey),
+                      style: const TextStyle(fontSize: 12, color: Colors.grey),
                     ),
                   ],
                 ),
               ),
               Container(
                 padding: const EdgeInsets.symmetric(
-                    horizontal: 10, vertical: 4),
+                  horizontal: 10,
+                  vertical: 4,
+                ),
                 decoration: BoxDecoration(
                   color: badgeColor.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(20),
                 ),
-                child: Text(badgeText,
-                    style: TextStyle(
-                      color: badgeColor,
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                    )),
+                child: Text(
+                  badgeText,
+                  style: TextStyle(
+                    color: badgeColor,
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
               ),
             ],
           ),

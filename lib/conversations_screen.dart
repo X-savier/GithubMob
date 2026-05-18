@@ -59,26 +59,28 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final t = VxrTheme.of(context);
     return Scaffold(
       backgroundColor: VxrTokens.bg,
-      appBar: VxrSurfaceAppBar(
+      appBar: VxrAppBar(
         title: 'Messages',
         subtitle: 'Your conversations',
         actions: [
           IconButton(
-            icon: Icon(Icons.refresh, color: t.text),
+            icon: const Icon(Icons.refresh, color: Colors.white),
             onPressed: _refresh,
           ),
         ],
         bottom: VxrSearchBar(
           controller: _searchController,
           hint: 'Search name, message, listing…',
+          onGradient: true,
           onChanged: (v) => setState(() => _query = v),
         ),
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator(color: VxrTokens.accent))
+          ? const Center(
+              child: CircularProgressIndicator(color: VxrTokens.accent),
+            )
           : RefreshIndicator(
               color: VxrTokens.accent,
               onRefresh: _refresh,
@@ -125,9 +127,14 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
         children: [
           Icon(Icons.forum_outlined, size: 56, color: t.textMuted),
           const SizedBox(height: 12),
-          Text('No conversations yet',
-              style: GoogleFonts.plusJakartaSans(
-                  fontSize: 15, fontWeight: FontWeight.w700, color: t.text)),
+          Text(
+            'No conversations yet',
+            style: GoogleFonts.plusJakartaSans(
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+              color: t.text,
+            ),
+          ),
           const SizedBox(height: 4),
           Text(
             _query.isEmpty
@@ -186,37 +193,50 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
                     Row(
                       children: [
                         Expanded(
-                          child: Text(name,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: GoogleFonts.plusJakartaSans(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w700,
-                                  color: t.text)),
+                          child: Text(
+                            name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: GoogleFonts.plusJakartaSans(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: t.text,
+                            ),
+                          ),
                         ),
                         if (ts != null)
-                          Text(_formatTimestamp(ts),
-                              style: GoogleFonts.dmSans(
-                                  fontSize: 10,
-                                  color: unread > 0 ? t.accent : t.textMuted,
-                                  fontWeight: unread > 0
-                                      ? FontWeight.w700
-                                      : FontWeight.w400)),
+                          Text(
+                            _formatTimestamp(ts),
+                            style: GoogleFonts.dmSans(
+                              fontSize: 10,
+                              color: unread > 0 ? t.accent : t.textMuted,
+                              fontWeight: unread > 0
+                                  ? FontWeight.w700
+                                  : FontWeight.w400,
+                            ),
+                          ),
                       ],
                     ),
                     if (listingTitle.isNotEmpty) ...[
                       const SizedBox(height: 2),
                       Row(
                         children: [
-                          Icon(Icons.home_outlined,
-                              size: 11, color: t.textMuted),
+                          Icon(
+                            Icons.home_outlined,
+                            size: 11,
+                            color: t.textMuted,
+                          ),
                           const SizedBox(width: 4),
                           Expanded(
-                            child: Text(listingTitle,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: GoogleFonts.dmSans(
-                                    fontSize: 10, color: t.textMuted)),
+                            child: Text(
+                              listingTitle,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.dmSans(
+                                fontSize: 10,
+                                color: t.textMuted,
+                              ),
+                            ),
                           ),
                         ],
                       ),
@@ -245,14 +265,19 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
                           const SizedBox(width: 8),
                           Container(
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 6, vertical: 2),
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
                             constraints: const BoxConstraints(
-                                minWidth: 18, minHeight: 18),
+                              minWidth: 18,
+                              minHeight: 18,
+                            ),
                             alignment: Alignment.center,
                             decoration: BoxDecoration(
                               color: t.accent,
-                              borderRadius:
-                                  BorderRadius.circular(VxrTokens.radiusPill),
+                              borderRadius: BorderRadius.circular(
+                                VxrTokens.radiusPill,
+                              ),
                             ),
                             child: Text(
                               unread > 99 ? '99+' : '$unread',
@@ -286,9 +311,14 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
         shape: BoxShape.circle,
       ),
       alignment: Alignment.center,
-      child: Text(initial,
-          style: GoogleFonts.plusJakartaSans(
-              fontWeight: FontWeight.w700, color: Colors.white, fontSize: 16)),
+      child: Text(
+        initial,
+        style: GoogleFonts.plusJakartaSans(
+          fontWeight: FontWeight.w700,
+          color: Colors.white,
+          fontSize: 16,
+        ),
+      ),
     );
     if (url.isEmpty) return fallback;
     return ClipOval(
@@ -312,8 +342,18 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
     if (diff.inHours < 24) return '${diff.inHours}h';
     if (diff.inDays < 7) return '${diff.inDays}d';
     const months = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
     ];
     return '${months[t.month - 1]} ${t.day}';
   }

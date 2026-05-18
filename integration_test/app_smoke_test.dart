@@ -6,8 +6,8 @@
 // Run with:
 //   flutter test integration_test/app_smoke_test.dart
 //
-// The full app initialises Supabase and Stripe in `main()`, so this
-// test requires real network access and an emulator/device. It does
+// The full app initialises Supabase in `main()`, so this test
+// requires real network access and an emulator/device. It does
 // NOT attempt to sign in (which would require seeded credentials);
 // for a richer flow add a follow-up test that types into the email
 // and password fields using `dart-define`d test credentials.

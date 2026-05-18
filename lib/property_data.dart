@@ -1457,8 +1457,11 @@ Future<({String id, String status})?> getMyApplicationForListing(
 // ─────────────────────────────────────────────
 
 /// Get-or-create the contract row for a given approved application.
-/// On first call we create a row with status='draft' and copy the
-/// listing's listing_type so the renderer knows which template to use.
+/// On first call we create a row with status='awaiting_tenant' and
+/// pre-populate the editor columns from `listing_financials`,
+/// `listing_locations`, profile data, and the application row so the
+/// landlord doesn't have to fill them in by hand. Mirrors the web
+/// `buildContractFromApplication` flow.
 Future<Map<String, dynamic>?> getOrCreateContract({
   required String applicationId,
   required String listingId,
@@ -1485,13 +1488,85 @@ Future<Map<String, dynamic>?> getOrCreateContract({
         .maybeSingle();
     if (existing != null) return Map<String, dynamic>.from(existing);
 
-    // Pull listing_type from listings (defaults to 'lease' if not set).
+    // Pull listing_type + extras (financials, location, availability, title).
     final listing = await supa
         .from('listings')
-        .select('listing_type')
+        .select('listing_type, title, '
+            'listing_financials(monthly_rent, security_deposit, advance_payment), '
+            'listing_locations(full_address, city, province), '
+            'listing_availability(lease_term, available_from)')
         .eq('id', listingId)
         .maybeSingle();
     final listingType = (listing?['listing_type'] ?? 'lease').toString();
+    final fin = (listing?['listing_financials'] is List &&
+            (listing!['listing_financials'] as List).isNotEmpty)
+        ? Map<String, dynamic>.from((listing['listing_financials'] as List).first)
+        : (listing?['listing_financials'] is Map
+            ? Map<String, dynamic>.from(listing!['listing_financials'] as Map)
+            : <String, dynamic>{});
+    final loc = (listing?['listing_locations'] is List &&
+            (listing!['listing_locations'] as List).isNotEmpty)
+        ? Map<String, dynamic>.from((listing['listing_locations'] as List).first)
+        : (listing?['listing_locations'] is Map
+            ? Map<String, dynamic>.from(listing!['listing_locations'] as Map)
+            : <String, dynamic>{});
+    final avail = (listing?['listing_availability'] is List &&
+            (listing!['listing_availability'] as List).isNotEmpty)
+        ? Map<String, dynamic>.from(
+            (listing['listing_availability'] as List).first)
+        : (listing?['listing_availability'] is Map
+            ? Map<String, dynamic>.from(
+                listing!['listing_availability'] as Map)
+            : <String, dynamic>{});
+
+    // Optional: profile rows for party names + contacts. Wrapped in
+    // try/catch because RLS on `profiles` may hide rows depending on
+    // policy; the column being null is fine (landlord can fill later).
+    Map<String, dynamic>? tenantProfile;
+    Map<String, dynamic>? landlordProfile;
+    try {
+      tenantProfile = await supa
+          .from('profiles')
+          .select('full_name, phone')
+          .eq('id', tenantId)
+          .maybeSingle();
+    } catch (_) {}
+    try {
+      landlordProfile = await supa
+          .from('profiles')
+          .select('full_name, phone')
+          .eq('id', landlordId)
+          .maybeSingle();
+    } catch (_) {}
+
+    final propertyAddress = (loc['full_address'] as String?) ??
+        [loc['city'], loc['province']]
+            .where((s) => s != null && s.toString().isNotEmpty)
+            .join(', ');
+
+    // Compute lease window from the listing's availability so the contract
+    // view doesn't show '—' for the start / end dates. End date only applies
+    // to fixed-term leases — month-to-month rentals leave it null.
+    //
+    // Defensive fallback: if a legacy listing lacks available_from we still
+    // refuse to write a NULL start_date — the contract is being created now,
+    // so today is the only defensible default. The enlistment form already
+    // requires the field for new listings.
+    final availableFromRaw = avail['available_from']?.toString();
+    final startIso = (availableFromRaw != null && availableFromRaw.isNotEmpty)
+        ? availableFromRaw.substring(0, 10)
+        : DateTime.now().toIso8601String().substring(0, 10);
+    String? endIso;
+    if (listingType == 'lease') {
+      final start = DateTime.tryParse(startIso);
+      final termStr = (avail['lease_term'] ?? '').toString();
+      final match = RegExp(r'(\d+)').firstMatch(termStr);
+      final months = int.tryParse(match?.group(1) ?? '') ?? 12;
+      if (start != null) {
+        final end = DateTime(start.year, start.month + months, start.day);
+        endIso = end.toIso8601String().substring(0, 10);
+      }
+    }
 
     final inserted = await supa
         .from('contract')
@@ -1502,6 +1577,23 @@ Future<Map<String, dynamic>?> getOrCreateContract({
           'landlord_id': landlordId,
           'listing_type': listingType,
           'status': 'awaiting_tenant',
+          'tenant_name': tenantProfile?['full_name'],
+          'tenant_contact': tenantProfile?['phone'],
+          'landlord_name': landlordProfile?['full_name'],
+          'landlord_contact': landlordProfile?['phone'],
+          'property_address': propertyAddress.isNotEmpty ? propertyAddress : null,
+          'monthly_rent': fin['monthly_rent'],
+          'security_deposit': fin['security_deposit'],
+          'advance_rent': fin['advance_payment'],
+          'duration': avail['lease_term'],
+          'start_date': startIso,
+          'end_date': endIso,
+          'entered_on': DateTime.now().toIso8601String().substring(0, 10),
+          'payment_due_date': 5,
+          'grace_period_days': 5,
+          'minor_repairs_threshold': 500,
+          'overnight_guest_threshold': 7,
+          'governing_city': loc['city'],
         })
         .select()
         .single();
@@ -1512,23 +1604,83 @@ Future<Map<String, dynamic>?> getOrCreateContract({
   }
 }
 
+/// Patch any of the editor columns on a contract row. Only an allow-list
+/// of editable columns is forwarded — signatures and status transitions
+/// have dedicated helpers (`signContractAs*`).
+Future<bool> updateContract(
+  String contractId,
+  Map<String, dynamic> patch,
+) async {
+  const allowed = <String>{
+    'listing_type',
+    'landlord_name', 'landlord_contact', 'tenant_name', 'tenant_contact',
+    'property_address', 'property_type', 'entered_on', 'start_date',
+    'end_date', 'duration', 'monthly_rent', 'security_deposit',
+    'advance_rent', 'payment_due_date', 'grace_period_days',
+    'payment_method', 'account_info', 'late_fee',
+    'minor_repairs_threshold', 'quiet_hours',
+    'overnight_guest_threshold', 'governing_city',
+  };
+  final update = <String, dynamic>{
+    'updated_at': DateTime.now().toIso8601String(),
+  };
+  for (final entry in patch.entries) {
+    if (allowed.contains(entry.key)) update[entry.key] = entry.value;
+  }
+  if (update.length == 1) return true; // nothing to actually patch
+  try {
+    await Supabase.instance.client
+        .from('contract')
+        .update(update)
+        .eq('id', contractId);
+    return true;
+  } catch (e) {
+    debugPrint('updateContract ERROR: $e');
+    return false;
+  }
+}
+
+/// Fetch a single contract row by id, joining listings (for cover photo
+/// / title / contract template URL) and the latest payment row.
+Future<Map<String, dynamic>?> fetchContractById(String contractId) async {
+  if (contractId.isEmpty) return null;
+  try {
+    final row = await Supabase.instance.client
+        .from('contract')
+        .select(
+            '*, payment(*), listings(id, title, listing_type, contract_template_url, contract_template_name, terms_override)')
+        .eq('id', contractId)
+        .maybeSingle();
+    return row == null ? null : Map<String, dynamic>.from(row);
+  } catch (e) {
+    debugPrint('fetchContractById ERROR: $e');
+    return null;
+  }
+}
+
 /// Persist the tenant's signature (raw stroke JSON + printed name).
-/// Advances status to 'awaiting_landlord'.
+/// Status becomes 'fully_signed' if the landlord has already signed,
+/// otherwise 'awaiting_landlord'. Either party can sign first.
 Future<bool> signContractAsTenant({
   required String contractId,
   required String signaturePayload,
   required String printedName,
 }) async {
   try {
-    await Supabase.instance.client
+    final supa = Supabase.instance.client;
+    final existing = await supa
         .from('contract')
-        .update({
-          'tenant_signature': signaturePayload,
-          'tenant_signed_name': printedName,
-          'tenant_signed_at': DateTime.now().toIso8601String(),
-          'status': 'awaiting_landlord',
-        })
-        .eq('id', contractId);
+        .select('landlord_signature')
+        .eq('id', contractId)
+        .maybeSingle();
+    final landlordSigned =
+        (existing?['landlord_signature']?.toString().isNotEmpty ?? false);
+    await supa.from('contract').update({
+      'tenant_signature': signaturePayload,
+      'tenant_signed_name': printedName,
+      'tenant_signed_at': DateTime.now().toIso8601String(),
+      'status': landlordSigned ? 'fully_signed' : 'awaiting_landlord',
+    }).eq('id', contractId);
     return true;
   } catch (e) {
     debugPrint('signContractAsTenant ERROR: $e');
@@ -1536,52 +1688,31 @@ Future<bool> signContractAsTenant({
   }
 }
 
-/// Persist the landlord's signature. Advances status to 'fully_signed'.
+/// Persist the landlord's signature. Status becomes 'fully_signed' if the
+/// tenant has already signed, otherwise 'awaiting_tenant'.
 Future<bool> signContractAsLandlord({
   required String contractId,
   required String signaturePayload,
   required String printedName,
 }) async {
   try {
-    await Supabase.instance.client
+    final supa = Supabase.instance.client;
+    final existing = await supa
         .from('contract')
-        .update({
-          'landlord_signature': signaturePayload,
-          'landlord_signed_name': printedName,
-          'landlord_signed_at': DateTime.now().toIso8601String(),
-          'status': 'fully_signed',
-        })
-        .eq('id', contractId);
+        .select('tenant_signature')
+        .eq('id', contractId)
+        .maybeSingle();
+    final tenantSigned =
+        (existing?['tenant_signature']?.toString().isNotEmpty ?? false);
+    await supa.from('contract').update({
+      'landlord_signature': signaturePayload,
+      'landlord_signed_name': printedName,
+      'landlord_signed_at': DateTime.now().toIso8601String(),
+      'status': tenantSigned ? 'fully_signed' : 'awaiting_tenant',
+    }).eq('id', contractId);
     return true;
   } catch (e) {
     debugPrint('signContractAsLandlord ERROR: $e');
-    return false;
-  }
-}
-
-/// Record a successful Stripe sandbox payment against a contract.
-Future<bool> recordPayment({
-  required String contractId,
-  required String paymentIntentId,
-  required int amountCents,
-  required String currency,
-}) async {
-  try {
-    await Supabase.instance.client.from('payment').insert({
-      'contract_id': contractId,
-      'stripe_payment_intent_id': paymentIntentId,
-      'amount_cents': amountCents,
-      'currency': currency,
-      'status': 'succeeded',
-      'paid_at': DateTime.now().toIso8601String(),
-    });
-    await Supabase.instance.client
-        .from('contract')
-        .update({'status': 'paid'})
-        .eq('id', contractId);
-    return true;
-  } catch (e) {
-    debugPrint('recordPayment ERROR: $e');
     return false;
   }
 }
@@ -1843,30 +1974,6 @@ Future<List<Map<String, dynamic>>> fetchActiveTenants() async {
   }
 }
 
-/// All payments the current tenant has made, joined with the contract
-/// and listing so the UI can render meaningful descriptions. Drives
-/// the Transaction History section on the payment screen.
-Future<List<Map<String, dynamic>>> fetchMyPaymentsWithContext() async {
-  try {
-    final userId = Supabase.instance.client.auth.currentUser?.id;
-    if (userId == null) return [];
-    final data = await Supabase.instance.client
-        .from('payment')
-        .select(
-          'id, amount_cents, currency, status, paid_at, '
-          'stripe_payment_intent_id, contract_id, '
-          'contract!inner(id, tenant_id, listing_id, '
-          'listings(title))',
-        )
-        .eq('contract.tenant_id', userId)
-        .order('paid_at', ascending: false);
-    return (data as List).cast<Map<String, dynamic>>();
-  } catch (e) {
-    debugPrint('fetchMyPaymentsWithContext ERROR: $e');
-    return [];
-  }
-}
-
 /// The next contract the tenant should pay — first row with
 /// status='fully_signed' (and not yet paid) ordered by signing date.
 /// Returns null when nothing is due.
@@ -1944,7 +2051,8 @@ Future<List<Map<String, dynamic>>> fetchMyApplicationsWithListing() async {
         .from('application')
         .select(
           'id, status, submitted_at, listing_id, '
-          'listings(id, title, monthly_rent, landlord_id, '
+          'listings(id, title, landlord_id, '
+          'listing_financials(monthly_rent, security_deposit, advance_payment), '
           'listing_locations(full_address, city, province))',
         )
         .eq('tenant_id', userId)
@@ -2469,12 +2577,51 @@ Future<List<Map<String, dynamic>>> getDeductions(String terminationId) async {
 /// Full termination state: contract + termination + deductions + open reports.
 /// Returns a map with keys: contract, termination, deductions, openReports, totals.
 Future<Map<String, dynamic>> getTerminationState(String contractId) async {
-  final results = await Future.wait([
-    fetchMyActiveContract(),
-    getTermination(contractId),
-  ]);
-  final contract = results[0];
-  final termination = results[1];
+  // Load contract by id — RLS (contract_select_party) scopes this to the
+  // tenant or landlord on the row, so it works for both parties. The
+  // Move-Out Checklist screen is landlord-only and cannot rely on
+  // fetchMyActiveContract (that helper filters by tenant_id = auth.uid()).
+  Map<String, dynamic>? contract;
+  try {
+    final row = await Supabase.instance.client
+        .from('contract')
+        .select(
+          'id, status, listing_id, tenant_id, landlord_id, application_id, '
+          'listing_type, tenant_signed_at, landlord_signed_at, '
+          'start_date, end_date, security_deposit, effective_end_date',
+        )
+        .eq('id', contractId)
+        .maybeSingle();
+    if (row != null) {
+      final c = Map<String, dynamic>.from(row);
+      final listingId = c['listing_id']?.toString();
+      if (listingId != null) {
+        try {
+          final listingData = await Supabase.instance.client
+              .from('listings_full')
+              .select(
+                'monthly_rent, security_deposit, advance_payment, '
+                'available_from, lease_term, full_address, city, province',
+              )
+              .eq('id', listingId)
+              .maybeSingle();
+          if (listingData != null) {
+            // Don't let a null listing column clobber a non-null contract column.
+            for (final entry in Map<String, dynamic>.from(listingData).entries) {
+              if (entry.value != null) c[entry.key] = entry.value;
+            }
+          }
+        } catch (e) {
+          debugPrint('getTerminationState listing enrich ERROR: $e');
+        }
+      }
+      contract = c;
+    }
+  } catch (e) {
+    debugPrint('getTerminationState contract fetch ERROR: $e');
+  }
+
+  final termination = await getTermination(contractId);
   List<Map<String, dynamic>> deductions = [];
   if (termination != null) {
     deductions = await getDeductions(termination['id'].toString());
@@ -2552,6 +2699,35 @@ Future<bool> requestTermination({
   try {
     final actorId = Supabase.instance.client.auth.currentUser?.id;
     if (actorId == null) return false;
+
+    // contract_termination has UNIQUE (contract_id). A superseded row
+    // (withdrawn mutual or landlord-closed) blocks a fresh insert, so
+    // delete it first. An open active row means a request is already in
+    // flight — bail out so the caller can surface that to the user.
+    final existing = await getTermination(contractId);
+    if (existing != null) {
+      final isSuperseded = existing['mutual_withdrawn_at'] != null ||
+          existing['landlord_closed_at'] != null;
+      if (!isSuperseded) {
+        debugPrint(
+            'requestTermination skipped: open termination already exists for $contractId');
+        return false;
+      }
+      await Supabase.instance.client
+          .from('contract_termination')
+          .delete()
+          .eq('id', existing['id']);
+      await _logContractEvent(
+        contractId: contractId,
+        actorId: actorId,
+        eventType: 'termination_superseded',
+        payload: {
+          'previous_termination_id': existing['id'],
+          'previous_type': existing['type'],
+          'previous_initiated_by': existing['initiated_by'],
+        },
+      );
+    }
 
     await Supabase.instance.client.from('contract_termination').insert({
       'contract_id': contractId,
@@ -2928,6 +3104,43 @@ Future<List<Map<String, dynamic>>> fetchActiveTenantsAll() async {
           if (tid != null) c['tenant_profile'] = byId[tid] ?? {};
         }
       } catch (_) {}
+    }
+
+    final contractIds = contracts
+        .map((c) => c['id']?.toString())
+        .whereType<String>()
+        .toList();
+    if (contractIds.isNotEmpty) {
+      try {
+        final terminations = await Supabase.instance.client
+            .from('contract_termination')
+            .select(
+              'id, contract_id, initiated_by, type, notice_date, effective_date, '
+              'reason, security_deposit_amount, mutual_proposed_at, '
+              'mutual_accepted_by_tenant_at, mutual_accepted_by_landlord_at, '
+              'mutual_withdrawn_at, tenant_vacated_confirmed_at, landlord_closed_at',
+            )
+            .inFilter('contract_id', contractIds)
+            .filter('mutual_withdrawn_at', 'is', null)
+            .filter('landlord_closed_at', 'is', null)
+            .order('notice_date', ascending: false);
+        // Keep only the most recent open termination per contract.
+        final byContractId = <String, Map<String, dynamic>>{};
+        for (final t in (terminations as List)) {
+          final row = Map<String, dynamic>.from(t as Map);
+          final cid = row['contract_id']?.toString();
+          if (cid == null) continue;
+          byContractId.putIfAbsent(cid, () => row);
+        }
+        for (final c in contracts) {
+          final cid = c['id']?.toString();
+          if (cid != null && byContractId.containsKey(cid)) {
+            c['termination'] = byContractId[cid];
+          }
+        }
+      } catch (e) {
+        debugPrint('fetchActiveTenantsAll termination enrich ERROR: $e');
+      }
     }
     return contracts;
   } catch (e) {

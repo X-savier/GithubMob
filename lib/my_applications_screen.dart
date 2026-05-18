@@ -8,6 +8,7 @@ import 'contract_view_screen.dart';
 import 'in_stay_dashboard_screen.dart';
 import 'property_data.dart';
 import 'theme/vxr_theme.dart';
+import 'theme/vxr_widgets.dart';
 import 'unit_details.dart';
 
 /// Tenant-facing inbox of all rental applications they've submitted.
@@ -60,11 +61,14 @@ class _MyApplicationsScreenState extends State<MyApplicationsScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: VxrTokens.bg,
-      appBar: AppBar(
-        flexibleSpace: const DecoratedBox(
-          decoration: BoxDecoration(gradient: VxrTokens.brandGradient),
+      appBar: VxrAppBar(
+        title: 'My Applications',
+        subtitle: 'Track your rental applications',
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
         ),
-        title: const Text('My Applications'),
+        bottomHeight: 48,
         bottom: TabBar(
           controller: _tabs,
           indicatorColor: Colors.white,
@@ -103,7 +107,9 @@ class _MyApplicationsScreenState extends State<MyApplicationsScreen>
               child: Text(
                 _emptyMessage(status),
                 style: GoogleFonts.dmSans(
-                    color: VxrTokens.textSub, fontSize: 13),
+                  color: VxrTokens.textSub,
+                  fontSize: 13,
+                ),
               ),
             ),
           ],
@@ -116,10 +122,8 @@ class _MyApplicationsScreenState extends State<MyApplicationsScreen>
         padding: const EdgeInsets.all(12),
         itemCount: rows.length,
         separatorBuilder: (_, _) => const SizedBox(height: 10),
-        itemBuilder: (_, i) => _ApplicationCard(
-          row: rows[i],
-          onChanged: _refresh,
-        ),
+        itemBuilder: (_, i) =>
+            _ApplicationCard(row: rows[i], onChanged: _refresh),
       ),
     );
   }
@@ -157,18 +161,31 @@ class _ApplicationCard extends StatelessWidget {
 
   String get _title =>
       (_listing['title']?.toString() ?? 'Listing').trim().isEmpty
-          ? 'Listing'
-          : _listing['title'].toString();
+      ? 'Listing'
+      : _listing['title'].toString();
+
+  num? get _monthlyRent {
+    final fin = _listing['listing_financials'];
+    if (fin is List && fin.isNotEmpty && fin.first is Map) {
+      final v = (fin.first as Map)['monthly_rent'];
+      return v is num ? v : num.tryParse(v?.toString() ?? '');
+    }
+    if (fin is Map) {
+      final v = fin['monthly_rent'];
+      return v is num ? v : num.tryParse(v?.toString() ?? '');
+    }
+    return null;
+  }
 
   String get _location {
     final loc = _listing['listing_locations'];
     if (loc is List && loc.isNotEmpty) {
       final m = loc.first;
       if (m is Map) {
-        final parts = [m['city'], m['province']]
-            .map((e) => e?.toString() ?? '')
-            .where((s) => s.isNotEmpty)
-            .toList();
+        final parts = [
+          m['city'],
+          m['province'],
+        ].map((e) => e?.toString() ?? '').where((s) => s.isNotEmpty).toList();
         return parts.join(', ');
       }
     }
@@ -197,7 +214,7 @@ class _ApplicationCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final badge = _statusBadge;
-    final rent = _listing['monthly_rent'];
+    final rent = _monthlyRent;
 
     return Container(
       decoration: BoxDecoration(
@@ -205,9 +222,10 @@ class _ApplicationCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(VxrTokens.radius),
         boxShadow: const [
           BoxShadow(
-              color: Color(0x10000000),
-              blurRadius: 10,
-              offset: Offset(0, 2)),
+            color: Color(0x10000000),
+            blurRadius: 10,
+            offset: Offset(0, 2),
+          ),
         ],
       ),
       padding: const EdgeInsets.all(14),
@@ -224,8 +242,7 @@ class _ApplicationCard extends StatelessWidget {
                   color: badge.color.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child:
-                    Icon(Icons.home_work_outlined, color: badge.color),
+                child: Icon(Icons.home_work_outlined, color: badge.color),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -237,7 +254,9 @@ class _ApplicationCard extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                          fontWeight: FontWeight.w600, fontSize: 14),
+                        fontWeight: FontWeight.w600,
+                        fontSize: 14,
+                      ),
                     ),
                     if (_location.isNotEmpty) ...[
                       const SizedBox(height: 2),
@@ -246,7 +265,9 @@ class _ApplicationCard extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                            fontSize: 12, color: VxrTokens.textSub),
+                          fontSize: 12,
+                          color: VxrTokens.textSub,
+                        ),
                       ),
                     ],
                     const SizedBox(height: 4),
@@ -256,14 +277,18 @@ class _ApplicationCard extends StatelessWidget {
                         _formatDate(row['submitted_at']),
                       ].where((s) => s.isNotEmpty).join(' · '),
                       style: const TextStyle(
-                          fontSize: 12, color: VxrTokens.textMuted),
+                        fontSize: 12,
+                        color: VxrTokens.textMuted,
+                      ),
                     ),
                   ],
                 ),
               ),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
                 decoration: BoxDecoration(
                   color: badge.color.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(20),
@@ -354,8 +379,9 @@ class _ApplicationCard extends StatelessWidget {
         icon: const Icon(Icons.hourglass_top_rounded, size: 16),
         label: const Text('Awaiting landlord'),
         style: _primaryStyle().copyWith(
-          backgroundColor:
-              WidgetStateProperty.all(VxrTokens.textMuted.withValues(alpha: 0.5)),
+          backgroundColor: WidgetStateProperty.all(
+            VxrTokens.textMuted.withValues(alpha: 0.5),
+          ),
         ),
       );
     }
@@ -370,9 +396,7 @@ class _ApplicationCard extends StatelessWidget {
             MaterialPageRoute(
               builder: (_) => ContractPaymentScreen(
                 contractId: id,
-                amountPhp: _listing['monthly_rent'] is num
-                    ? (_listing['monthly_rent'] as num).toInt()
-                    : 0,
+                amountPhp: _monthlyRent?.toInt() ?? 0,
                 listingTitle: _title,
               ),
             ),
@@ -389,9 +413,7 @@ class _ApplicationCard extends StatelessWidget {
       return ElevatedButton.icon(
         onPressed: () => Navigator.push(
           context,
-          MaterialPageRoute(
-            builder: (_) => const InStayDashboardScreen(),
-          ),
+          MaterialPageRoute(builder: (_) => const InStayDashboardScreen()),
         ),
         icon: const Icon(Icons.home_outlined, size: 16),
         label: const Text('View rental'),
@@ -445,16 +467,13 @@ class _ApplicationCard extends StatelessWidget {
 
   Future<void> _openEdit(BuildContext context) async {
     final appId = row['id']?.toString() ?? '';
-    final tenantId =
-        Supabase.instance.client.auth.currentUser?.id ?? '';
+    final tenantId = Supabase.instance.client.auth.currentUser?.id ?? '';
     if (appId.isEmpty || tenantId.isEmpty) return;
     final saved = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
-        builder: (_) => ApplicationEditScreen(
-          applicationId: appId,
-          tenantId: tenantId,
-        ),
+        builder: (_) =>
+            ApplicationEditScreen(applicationId: appId, tenantId: tenantId),
       ),
     );
     if (saved == true) onChanged();
@@ -464,8 +483,7 @@ class _ApplicationCard extends StatelessWidget {
     return OutlinedButton.styleFrom(
       foregroundColor: VxrTokens.textSub,
       side: const BorderSide(color: VxrTokens.border),
-      shape:
-          RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       padding: const EdgeInsets.symmetric(vertical: 10),
       textStyle: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
     );
@@ -475,8 +493,7 @@ class _ApplicationCard extends StatelessWidget {
     return ElevatedButton.styleFrom(
       backgroundColor: VxrTokens.accent,
       foregroundColor: Colors.white,
-      shape:
-          RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       padding: const EdgeInsets.symmetric(vertical: 10),
       textStyle: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
       elevation: 0,

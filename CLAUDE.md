@@ -8,7 +8,7 @@
 - **Current Version**: 1.0.0+1
 - **Platform**: Flutter (Android + iOS), targeting Dart SDK ^3.11.0
 - **Backend**: Supabase (PostgreSQL + Auth + Storage + Edge Functions)
-- **Payment**: Stripe (sandbox mode with `flutter_stripe`)
+- **Payment**: PayMongo (sandbox mode — direct REST from the app for tokenization, Supabase Edge Functions for secret-key operations)
 - **Maps**: Google Maps Flutter (`google_maps_flutter`)
 
 ---
@@ -22,7 +22,7 @@
 | Backend | Supabase (Auth, Database, Storage, Realtime) |
 | Maps | Google Maps Flutter |
 | Location | Geolocator |
-| Payments | Stripe (`flutter_stripe`) |
+| Payments | PayMongo (REST via `http`, redirect flows via `webview_flutter`, secret-key calls in Supabase Edge Functions) |
 | Camera / 360° | `camerawesome`, `camera_360`, `panorama_viewer`, `opencv_dart` | *(capture is mobile-only; viewer is shared)* |
 | Image Handling | `image_picker`, `file_picker`, `image`, `flutter_image_compress` |
 | PDF / Contracts | `pdf`, `printing` |
@@ -33,7 +33,7 @@
 ### Backend (Supabase)
 - **Auth**: Email/password + Google OAuth, JWT tokens
 - **Database**: PostgreSQL with RLS (Row Level Security)
-- **Edge Functions**: `create-payment-intent` (Stripe server-side)
+- **Edge Functions**: `paymongo-create-payment-intent`, `paymongo-attach-payment-method`, `paymongo-record-payment`, `paymongo-record-mock-payment`, `paymongo-add-method`, `paymongo-delete-method`, `paymongo-set-default-method`, `paymongo-webhook` (PayMongo secret-key calls live server-side)
 - **Storage**: Property images, listing contracts, panoramas
 
 ### Web (Planned)
@@ -96,7 +96,14 @@ supabase/
 │   ├── verification_module.sql
 │   └── ...
 └── functions/
-    └── create-payment-intent/     # Stripe PaymentIntent Edge Function
+    ├── paymongo-create-payment-intent/   # Create a PayMongo PaymentIntent for a contract
+    ├── paymongo-attach-payment-method/   # Attach a PaymentMethod to an intent (handles redirects)
+    ├── paymongo-record-payment/          # Confirm + write the succeeded intent to the ledger
+    ├── paymongo-record-mock-payment/     # Demo-mode payment recorder (gated by MOCK_PAYMENTS_ENABLED)
+    ├── paymongo-add-method/              # Save a tokenized method for one-tap reuse
+    ├── paymongo-delete-method/           # Remove a saved method
+    ├── paymongo-set-default-method/      # Mark a saved method as default
+    └── paymongo-webhook/                 # PayMongo webhook receiver
 
 assets/
 ├── images/                        # property1–10.jpg, logo.jpg
@@ -173,12 +180,12 @@ Deep navigation from Home/Search:
 - Generate and manage lease contracts
 - Manage current tenants
 - Receive and track maintenance/cleaning reports
-- Receive payments via Stripe
+- Receive payments via PayMongo
 
 ### Shared
 - Supabase Realtime for chat
 - PSGC-based location picker (Philippines: region → province → city → barangay)
-- Stripe payments (sandbox)
+- PayMongo payments (sandbox) — cards, GCash, Maya, GrabPay, bank transfer
 - Identity verification flow
 - Google Maps with property markers and user location
 
@@ -212,8 +219,9 @@ Distance calculation uses the **Haversine formula** (no API calls). Fallback loc
 
 - `SUPABASE_URL`: `https://mqsdtgvxyrvkornnifen.supabase.co`
 - `SUPABASE_ANON_KEY`: stored in `main.dart` (move to `.env` or `--dart-define` before production)
-- `STRIPE_PUBLISHABLE_KEY`: `pk_test_…` in `main.dart` (sandbox only, safe to ship but should be externalized)
-- `STRIPE_SECRET_KEY`: stored server-side in the Supabase Edge Function (`create-payment-intent`)
+- `PAYMONGO_PUBLIC_KEY`: `pk_test_…` passed via `--dart-define=PAYMONGO_PUBLIC_KEY=...` (see [dart_defines.example.json](dart_defines.example.json)); used by `lib/services/paymongo.dart` for tokenization
+- `PAYMONGO_SECRET_KEY`: stored server-side as a Supabase secret; only the `paymongo-*` Edge Functions ever see it
+- `MOCK_PAYMENTS_ENABLED`: optional `--dart-define` flag that surfaces the "Use mock payment" toggle on the checkout screen
 
 ---
 
@@ -238,6 +246,37 @@ flutter test
 
 ---
 
+## Integration Test Harness
+
+A cross-platform integration suite lives under `tests/` (Node) plus
+`integration_test/services/` (Flutter) and `tools/` (pure-Dart probe).
+It exercises real Supabase + real PayMongo sandbox for both the mobile
+app and the web app at `D:\school works\vxr-web\my-react-app`.
+
+Setup + run instructions are in [tests/README.md](tests/README.md).
+Short version:
+
+```bash
+# 1. One-time: create a dedicated TEST Supabase project, apply migrations,
+#    deploy Edge Functions, copy tests/.env.test.example → tests/.env.test
+cd tests && npm install
+
+# 2. Seed deterministic test users + listing + contract
+npm --prefix tests run seed
+
+# 3. Mobile service-layer tests (requires emulator/device)
+flutter test integration_test/services \
+  --dart-define-from-file=tests/.env.test.json
+
+# 4. Web service-layer tests (run from the web repo)
+cd "D:\school works\vxr-web\my-react-app" && npm run test
+
+# 5. Cross-platform contract tests
+npm --prefix tests run test:contract
+```
+
+---
+
 ## Coding Conventions
 
 - **State management**: Local `StatefulWidget` + `setState` (no external state manager)
@@ -256,21 +295,22 @@ The web app will share the **same Supabase project** (same auth, database, stora
 
 - **Shared backend**: No schema changes needed; add web-compatible RLS policies if required
 - **Auth**: Supabase JS SDK (`@supabase/supabase-js`) on web mirrors the mobile Flutter SDK
-- **Payments**: Stripe.js on web replaces `flutter_stripe`
+- **Payments**: PayMongo on web — use `paymongo.js` (or direct REST calls) for tokenization; reuse the existing `paymongo-*` Supabase Edge Functions unchanged for server-side intent/method operations
 - **Maps**: Replace `google_maps_flutter` with Google Maps JavaScript API or a React/Vue map library
 - **360° Tours**: Three.js or Pannellum for panorama **viewing only** on web — panorama capture (`camerawesome`, `camera_360`, OpenCV stitching) is **mobile-only** and has no web equivalent
 - **Real-time Chat**: Supabase Realtime channels work identically on web
 - **PSGC Data**: Same JSON assets can be served statically on web
 - **Contracts/PDF**: Use a web PDF library (e.g., `pdf-lib`, `react-pdf`)
 
-Suggested web stack: **Next.js (React) + TypeScript + Supabase JS + Stripe.js + Tailwind CSS**
+Suggested web stack: **Next.js (React) + TypeScript + Supabase JS + PayMongo (REST / paymongo.js) + Tailwind CSS**
 
 ---
 
 ## Known Issues / TODOs
 
 - Supabase URL and keys are hardcoded in `main.dart` — should use `--dart-define` or a secrets manager
-- Stripe is in sandbox mode — production keys and webhook verification needed before launch
+- PayMongo is in sandbox mode — production keys and `paymongo-webhook` signature verification needed before launch
+- The `payment` table still carries a legacy `stripe_payment_intent_id NOT NULL` column from the pre-PayMongo era; new rows dual-write to it (see `paymongo-record-mock-payment`) and reads `COALESCE` it with `paymongo_payment_intent_id`
 - Some screens may still have stub/placeholder implementations
 - Web app: not yet started; framework decision pending
 - Consider adding a global state manager (Riverpod) when introducing the web app to share logic patterns

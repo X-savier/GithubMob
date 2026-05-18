@@ -222,6 +222,6 @@ INSERT INTO public.cms_faq (category, question, answer, sort_order)
 SELECT * FROM (VALUES
   ('general',  'How do I list my property?',           'Sign up as a landlord and use the My Listings page.', 1),
   ('general',  'How do I apply for a unit?',           'Open the unit and tap Apply.',                        2),
-  ('payments', 'What payment methods are supported?',  'GCash and Stripe-supported cards.',                   3)
+  ('payments', 'What payment methods are supported?',  'GCash, Maya, GrabPay, and cards via PayMongo.',       3)
 ) AS v(category, question, answer, sort_order)
 WHERE NOT EXISTS (SELECT 1 FROM public.cms_faq);

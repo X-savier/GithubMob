@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'theme/vxr_theme.dart';
+import 'theme/vxr_widgets.dart';
 import 'property_data.dart';
 
 class ReportManagementScreen extends StatefulWidget {
@@ -107,17 +108,20 @@ class _ReportManagementScreenState extends State<ReportManagementScreen>
 
     return Scaffold(
       backgroundColor: VxrTokens.bg,
-      appBar: AppBar(
-        flexibleSpace: const DecoratedBox(
-          decoration: BoxDecoration(gradient: VxrTokens.brandGradient),
+      appBar: VxrAppBar(
+        title: 'Reports',
+        subtitle: 'Track and submit maintenance reports',
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
         ),
-        title: const Text('Reports'),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh, color: Colors.white),
             onPressed: _loading ? null : _refresh,
           ),
         ],
+        bottomHeight: 48,
         bottom: hasBoth
             ? TabBar(
                 controller: _tabs,

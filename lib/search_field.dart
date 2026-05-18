@@ -190,12 +190,12 @@ class _SearchFieldScreenState extends State<SearchFieldScreen> {
     final t = VxrTheme.of(context);
     return Scaffold(
       backgroundColor: VxrTokens.bg,
-      appBar: VxrSurfaceAppBar(
+      appBar: VxrAppBar(
         title: 'Search Properties',
         subtitle: 'Find your perfect rental home',
         actions: [
           IconButton(
-            icon: Icon(Icons.favorite_border, color: t.text),
+            icon: const Icon(Icons.favorite_border, color: Colors.white),
             onPressed: () {
               Navigator.push(
                 context,
@@ -206,6 +206,7 @@ class _SearchFieldScreenState extends State<SearchFieldScreen> {
         ],
         bottom: VxrSearchBar(
           controller: _searchController,
+          onGradient: true,
           onChanged: (value) => setState(() => _searchQuery = value),
           onFilterTap: _openFilters,
         ),

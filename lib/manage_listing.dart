@@ -194,30 +194,13 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
 
     final scaffold = Scaffold(
       backgroundColor: kPageBg,
-      appBar: AppBar(
-        systemOverlayStyle: const SystemUiOverlayStyle(
-          statusBarColor: Colors.transparent,
-          statusBarIconBrightness: Brightness.light,
-          statusBarBrightness: Brightness.dark,
-        ),
-        backgroundColor: Colors.transparent,
-        flexibleSpace: const DecoratedBox(
-          decoration: BoxDecoration(gradient: VxrTokens.brandGradient),
-        ),
-        elevation: 0,
+      appBar: VxrAppBar(
+        title: 'Manage Listing',
+        subtitle: 'Edit, archive, or refresh your properties',
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.white),
           onPressed: () => Navigator.pop(context),
         ),
-        title: const Text(
-          'Manage Listing',
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 20,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        centerTitle: true,
       ),
       body: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -926,64 +909,20 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: kPageBg,
-      appBar: AppBar(
-        flexibleSpace: const DecoratedBox(
-          decoration: BoxDecoration(gradient: VxrTokens.brandGradient),
-        ),
-        elevation: 0,
+      appBar: VxrAppBar(
+        title: widget.existingListingId != null
+            ? 'Edit Listing'
+            : 'Create New Listing',
+        subtitle: 'Fill out the property details',
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.white, size: 22),
           onPressed: () => Navigator.pop(context),
-        ),
-        title: Row(
-          children: [
-            Container(
-              width: 28,
-              height: 28,
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(6),
-              ),
-              alignment: Alignment.center,
-              child: Text(
-                'V',
-                style: TextStyle(
-                  color: kCoral,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 16,
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            const Text(
-              'ViewxRent',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
         ),
       ),
       body: SingleChildScrollView(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const SizedBox(height: 20),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Text(
-                widget.existingListingId != null
-                    ? 'Edit Listing'
-                    : 'Create New Listing',
-                style: const TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w600,
-                  color: kCoral,
-                ),
-              ),
-            ),
             const SizedBox(height: 16),
             _buildListingTypeSelector(),
             _buildListingTitleSection(),
@@ -1351,6 +1290,45 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
   );
 
   // ── Pick address from map ──
+  // Parses a Google `formatted_address` into PSGC-friendly slots.
+  // (Local helper class declared below as _ParsedAddress.)
+
+  //
+  // Google returns addresses like:
+  //   "P. Burgos St, Dasmariñas, Cavite, Philippines"
+  //   "Salitran III, Dasmariñas, 4114 Cavite, Philippines"
+  //   "123 Main St, Quezon City, Metro Manila, Philippines"
+  //
+  // We split on commas, strip embedded postal codes, drop the trailing
+  // country segment, and assign the remaining tail to province / city /
+  // barangay from the end inward. Whatever segments aren't present stay
+  // empty and the landlord can pick them manually.
+  _ParsedAddress _parseLocationFromFullAddress(String full) {
+    if (full.trim().isEmpty) return const _ParsedAddress();
+
+    final parts = full
+        .split(',')
+        .map((s) => s.trim())
+        // Strip embedded 4-digit postal codes ("4114 Cavite" → "Cavite").
+        .map((s) => s.replaceAll(RegExp(r'\b\d{4}\b'), '').trim())
+        .where((s) => s.isNotEmpty)
+        .toList();
+
+    // Drop trailing "Philippines" (or any non-PH country) so it never
+    // contaminates the province slot.
+    if (parts.isNotEmpty && parts.last.toLowerCase().contains('philippines')) {
+      parts.removeLast();
+    }
+
+    if (parts.isEmpty) return const _ParsedAddress();
+
+    final province = parts.isNotEmpty ? parts[parts.length - 1] : '';
+    final city = parts.length >= 2 ? parts[parts.length - 2] : '';
+    final barangay = parts.length >= 3 ? parts[parts.length - 3] : '';
+
+    return _ParsedAddress(province: province, city: city, barangay: barangay);
+  }
+
   Future<void> _pickAddressFromMap() async {
     LatLng? initialPos;
 
@@ -1394,16 +1372,29 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
 
     if (result != null && mounted) {
       setState(() {
-        if (result['full_address']?.isNotEmpty == true) {
-          _fullAddressCtrl.text = result['full_address']!;
+        final fullAddress = result['full_address'] ?? '';
+        if (fullAddress.isNotEmpty) {
+          _fullAddressCtrl.text = fullAddress;
         }
-        if (result['city']?.isNotEmpty == true) {
-          _cityCtrl.text = result['city']!;
-        }
-        if (result['province']?.isNotEmpty == true) {
+
+        // Derive PSGC override values from the full address string itself
+        // (not from Google's structured components, which often disagree
+        // with the PSGC dataset spelling). The PSGC widget re-bootstraps
+        // when its initial*Name props change.
+        final parsed = _parseLocationFromFullAddress(fullAddress);
+        if (parsed.province.isNotEmpty) {
+          _provinceCtrl.text = parsed.province;
+        } else if (result['province']?.isNotEmpty == true) {
           _provinceCtrl.text = result['province']!;
         }
-        if (result['barangay']?.isNotEmpty == true) {
+        if (parsed.city.isNotEmpty) {
+          _cityCtrl.text = parsed.city;
+        } else if (result['city']?.isNotEmpty == true) {
+          _cityCtrl.text = result['city']!;
+        }
+        if (parsed.barangay.isNotEmpty) {
+          _streetAreaCtrl.text = parsed.barangay;
+        } else if (result['barangay']?.isNotEmpty == true) {
           _streetAreaCtrl.text = result['barangay']!;
         }
         if (result['postal_code']?.isNotEmpty == true) {
@@ -1652,7 +1643,7 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _fieldLabel('Available From:'),
+              _fieldLabel('Available From: *'),
               TextField(
                 readOnly: true,
                 onTap: () async {
@@ -2730,9 +2721,12 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
       MaterialPageRoute(
         builder: (_) => Scaffold(
           appBar: AppBar(
-            backgroundColor: kCoral,
+            backgroundColor: Colors.transparent,
             foregroundColor: Colors.white,
             elevation: 0,
+            flexibleSpace: const DecoratedBox(
+              decoration: BoxDecoration(gradient: VxrTokens.brandGradient),
+            ),
             title: const Text(
               'Contract Preview',
               style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
@@ -3701,6 +3695,21 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
       return;
     }
 
+    // available_from feeds the auto-generated contract's lease window
+    // (contract.start_date / contract.end_date). Leaving it null produces
+    // blank Lease Start/End dates on the signed PDF and trips the
+    // tenant's "Some lease details are missing" banner on the web.
+    if (_availableFrom == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Please pick an "Available From" date (Lease Details section).',
+          ),
+        ),
+      );
+      return;
+    }
+
     setState(() => _isSaving = true);
 
     try {
@@ -4539,4 +4548,16 @@ class _ListingMapAddressPickerState extends State<_ListingMapAddressPicker> {
       ),
     );
   }
+}
+
+class _ParsedAddress {
+  final String province;
+  final String city;
+  final String barangay;
+
+  const _ParsedAddress({
+    this.province = '',
+    this.city = '',
+    this.barangay = '',
+  });
 }

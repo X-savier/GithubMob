@@ -52,51 +52,55 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: VxrTokens.bg,
-      appBar: AppBar(
-        flexibleSpace: const DecoratedBox(
-          decoration: BoxDecoration(gradient: VxrTokens.brandGradient),
+      appBar: VxrAppBar(
+        title: 'My Favorites',
+        subtitle: 'Listings you saved',
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
         ),
-        title: const Text('My Favorites'),
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator(color: VxrTokens.accent))
+          ? const Center(
+              child: CircularProgressIndicator(color: VxrTokens.accent),
+            )
           : _items.isEmpty
-              ? _buildEmptyState()
-              : RefreshIndicator(
-                  color: VxrTokens.accent,
-                  onRefresh: _load,
-                  child: ListView.separated(
-                    padding: const EdgeInsets.all(18),
-                    itemCount: _items.length,
-                    separatorBuilder: (_, _) => const SizedBox(height: 10),
-                    itemBuilder: (context, index) {
-                      final p = _items[index];
-                      return VxrPropertyCard(
-                        image: p.image,
-                        imageIsAsset: p.image.startsWith('assets/'),
-                        title: p.title,
-                        location: p.location,
-                        price: p.price,
-                        beds: p.beds,
-                        baths: p.baths,
-                        area: p.area.isEmpty ? '—' : p.area,
-                        label: (p.label != null && p.label!.isNotEmpty)
-                            ? p.label
-                            : null,
-                        favorited: true,
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => UnitDetailsScreen(property: p),
-                            ),
-                          ).then((_) => _load());
-                        },
-                        onFavoriteTap: () => _unbookmark(p),
-                      );
+          ? _buildEmptyState()
+          : RefreshIndicator(
+              color: VxrTokens.accent,
+              onRefresh: _load,
+              child: ListView.separated(
+                padding: const EdgeInsets.all(18),
+                itemCount: _items.length,
+                separatorBuilder: (_, _) => const SizedBox(height: 10),
+                itemBuilder: (context, index) {
+                  final p = _items[index];
+                  return VxrPropertyCard(
+                    image: p.image,
+                    imageIsAsset: p.image.startsWith('assets/'),
+                    title: p.title,
+                    location: p.location,
+                    price: p.price,
+                    beds: p.beds,
+                    baths: p.baths,
+                    area: p.area.isEmpty ? '—' : p.area,
+                    label: (p.label != null && p.label!.isNotEmpty)
+                        ? p.label
+                        : null,
+                    favorited: true,
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => UnitDetailsScreen(property: p),
+                        ),
+                      ).then((_) => _load());
                     },
-                  ),
-                ),
+                    onFavoriteTap: () => _unbookmark(p),
+                  );
+                },
+              ),
+            ),
     );
   }
 
@@ -108,12 +112,19 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
         children: [
           Icon(Icons.favorite_border, size: 56, color: t.textMuted),
           const SizedBox(height: 12),
-          Text('No favorites yet',
-              style: GoogleFonts.plusJakartaSans(
-                  fontSize: 15, fontWeight: FontWeight.w700, color: t.text)),
+          Text(
+            'No favorites yet',
+            style: GoogleFonts.plusJakartaSans(
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+              color: t.text,
+            ),
+          ),
           const SizedBox(height: 6),
-          Text('Tap the heart on a listing to save it here.',
-              style: GoogleFonts.dmSans(fontSize: 12, color: t.textSub)),
+          Text(
+            'Tap the heart on a listing to save it here.',
+            style: GoogleFonts.dmSans(fontSize: 12, color: t.textSub),
+          ),
         ],
       ),
     );
@@ -127,7 +138,8 @@ Future<bool> toggleBookmark({
   required String listingId,
   required bool currentlyBookmarked,
 }) async {
-  if (Supabase.instance.client.auth.currentUser == null) return currentlyBookmarked;
+  if (Supabase.instance.client.auth.currentUser == null)
+    return currentlyBookmarked;
   final ok = currentlyBookmarked
       ? await removeBookmark(listingId)
       : await addBookmark(listingId);

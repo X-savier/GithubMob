@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'contract_payment_screen.dart';
 import 'services/payments_service.dart';
@@ -7,6 +8,20 @@ import 'services/payment_methods_service.dart';
 import 'theme/vxr_theme.dart';
 import 'theme/vxr_widgets.dart';
 import 'widgets/add_payment_method_modal.dart';
+
+/// Bundles a tenant's active (paid) contract with its computed rent
+/// status row from the `contract_rent_status` view so the Overview
+/// tab can render a "Pay [Month]" tile per contract.
+class _ActiveContractWithRentStatus {
+  final String contractId;
+  final String? listingTitle;
+  final ContractRentStatus status;
+  const _ActiveContractWithRentStatus({
+    required this.contractId,
+    required this.listingTitle,
+    required this.status,
+  });
+}
 
 class PaymentScreen extends StatefulWidget {
   /// When provided, the Overview tab includes this specific contract at the
@@ -29,6 +44,7 @@ class _PaymentScreenState extends State<PaymentScreen>
   List<InProgressContract> _inProgress = const [];
   List<PaymentTransactionRow> _history = const [];
   List<SavedPaymentMethod> _methods = const [];
+  List<_ActiveContractWithRentStatus> _activeRents = const [];
 
   @override
   void initState() {
@@ -51,14 +67,50 @@ class _PaymentScreenState extends State<PaymentScreen>
         fetchMyInProgressContracts(),
         fetchMyPaymentsWithContext(),
         listMyPaymentMethods(),
+        _fetchActiveContractsWithRent(),
       ]);
       if (!mounted) return;
       _next = results[0] as NextDueContract?;
       _inProgress = results[1] as List<InProgressContract>;
       _history = results[2] as List<PaymentTransactionRow>;
       _methods = results[3] as List<SavedPaymentMethod>;
+      _activeRents = results[4] as List<_ActiveContractWithRentStatus>;
     } catch (_) {/* show empty states */} finally {
       if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  /// Pull contracts the current tenant is in-stay on (`status='paid'` or
+  /// later post-move-in lifecycle) and bundle each with its rent status
+  /// view row so the Overview tab can render "Pay May 2026" tiles.
+  Future<List<_ActiveContractWithRentStatus>> _fetchActiveContractsWithRent() async {
+    try {
+      final sb = Supabase.instance.client;
+      final uid = sb.auth.currentUser?.id;
+      if (uid == null) return const [];
+      final rows = await sb
+          .from('contract')
+          .select('id, listing_id, listings(id, title)')
+          .eq('tenant_id', uid)
+          .inFilter('status',
+              ['paid', 'terminating', 'expiring', 'terminated', 'ended'])
+          .order('created_at', ascending: false);
+      final out = <_ActiveContractWithRentStatus>[];
+      for (final r in (rows as List)) {
+        final m = Map<String, dynamic>.from(r);
+        final status =
+            await fetchContractRentStatus(m['id'].toString());
+        if (status == null) continue;
+        final listing = m['listings'] is Map ? m['listings'] as Map : const {};
+        out.add(_ActiveContractWithRentStatus(
+          contractId: m['id'].toString(),
+          listingTitle: listing['title']?.toString(),
+          status: status,
+        ));
+      }
+      return out;
+    } catch (_) {
+      return const [];
     }
   }
 
@@ -98,6 +150,7 @@ class _PaymentScreenState extends State<PaymentScreen>
                     next: _next,
                     inProgress: _inProgress,
                     history: _history,
+                    activeRents: _activeRents,
                     contractIdOverride: widget.contractId,
                     amountOverride: widget.amountPhp,
                     onPaid: _load,
@@ -115,6 +168,7 @@ class _OverviewTab extends StatelessWidget {
   final NextDueContract? next;
   final List<InProgressContract> inProgress;
   final List<PaymentTransactionRow> history;
+  final List<_ActiveContractWithRentStatus> activeRents;
   final String? contractIdOverride;
   final int? amountOverride;
   final VoidCallback onPaid;
@@ -122,6 +176,7 @@ class _OverviewTab extends StatelessWidget {
     required this.next,
     required this.inProgress,
     required this.history,
+    required this.activeRents,
     required this.contractIdOverride,
     required this.amountOverride,
     required this.onPaid,
@@ -181,6 +236,40 @@ class _OverviewTab extends StatelessWidget {
             ),
           ],
         ),
+        if (activeRents.isNotEmpty) ...[
+          const SizedBox(height: 18),
+          Text(
+            'Rent status',
+            style: GoogleFonts.plusJakartaSans(
+              fontSize: 15,
+              fontWeight: FontWeight.w800,
+              color: VxrTokens.text,
+            ),
+          ),
+          const SizedBox(height: 8),
+          ...activeRents.map((a) => _RentStatusCard(
+                data: a,
+                onPay: () async {
+                  final next = a.status.nextDueMonth;
+                  if (next == null) return;
+                  final ym =
+                      '${next.year.toString().padLeft(4, '0')}-${next.month.toString().padLeft(2, '0')}';
+                  final rent = (a.status.monthlyRent ?? 0).toInt();
+                  await Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => ContractPaymentScreen(
+                        contractId: a.contractId,
+                        amountPhp: rent,
+                        listingTitle: a.listingTitle,
+                        monthlyRent: rent,
+                        billingMonth: ym,
+                      ),
+                    ),
+                  );
+                  onPaid();
+                },
+              )),
+        ],
         const SizedBox(height: 18),
         Text(
           'Actionable contracts',
@@ -214,6 +303,122 @@ class _OverviewTab extends StatelessWidget {
                 },
               )),
       ],
+    );
+  }
+}
+
+class _RentStatusCard extends StatelessWidget {
+  final _ActiveContractWithRentStatus data;
+  final VoidCallback onPay;
+  const _RentStatusCard({required this.data, required this.onPay});
+
+  @override
+  Widget build(BuildContext context) {
+    final s = data.status;
+    final caughtUp = s.monthsUnpaid == 0;
+    final nextLabel =
+        s.nextDueMonth == null ? '—' : _formatMonth(s.nextDueMonth!);
+    final lastLabel = s.lastPaidMonth == null
+        ? 'No payments yet'
+        : 'Last paid: ${_formatMonth(s.lastPaidMonth!)}';
+    final rent = (s.monthlyRent ?? 0).toInt();
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: VxrTokens.surface,
+        borderRadius: BorderRadius.circular(VxrTokens.radius),
+        border: Border.all(color: VxrTokens.border),
+        boxShadow: VxrTokens.shadowSm,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  data.listingTitle ?? 'Active contract',
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                    color: VxrTokens.text,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: (caughtUp ? VxrTokens.success : VxrTokens.warning)
+                      .withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(VxrTokens.radiusPill),
+                ),
+                child: Text(
+                  caughtUp
+                      ? 'Up to date'
+                      : '${s.monthsUnpaid} month${s.monthsUnpaid == 1 ? '' : 's'} due',
+                  style: GoogleFonts.dmSans(
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w800,
+                    color:
+                        caughtUp ? VxrTokens.success : VxrTokens.warning,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            lastLabel,
+            style: GoogleFonts.dmSans(
+              fontSize: 11.5,
+              color: VxrTokens.textSub,
+            ),
+          ),
+          if (!caughtUp) ...[
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Next: $nextLabel',
+                        style: GoogleFonts.plusJakartaSans(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: VxrTokens.text,
+                        ),
+                      ),
+                      Text(
+                        '₱${_formatPeso(rent)}',
+                        style: GoogleFonts.plusJakartaSans(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w800,
+                          color: VxrTokens.accent,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                ElevatedButton.icon(
+                  onPressed: onPay,
+                  icon: const Icon(Icons.payments_outlined, size: 16),
+                  label: Text('Pay $nextLabel'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: VxrTokens.accent,
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
     );
   }
 }
@@ -499,6 +704,52 @@ class _HistoryRow extends StatelessWidget {
                     fontSize: 11, color: VxrTokens.textSub,
                   ),
                 ),
+                if (row.billingMonth != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(
+                      'Rent for ${_formatMonth(row.billingMonth!)}',
+                      style: GoogleFonts.dmSans(
+                        fontSize: 11,
+                        color: VxrTokens.accent,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                if (row.recordedBy != null) ...[
+                  const SizedBox(height: 4),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: VxrTokens.warning.withValues(alpha: 0.12),
+                      borderRadius:
+                          BorderRadius.circular(VxrTokens.radiusPill),
+                    ),
+                    child: Text(
+                      'Recorded by landlord',
+                      style: GoogleFonts.dmSans(
+                        fontSize: 9.5,
+                        color: VxrTokens.warning,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                ],
+                if ((row.note ?? '').isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                      row.note!,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.dmSans(
+                        fontSize: 11,
+                        color: VxrTokens.textSub,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                  ),
               ],
             ),
           ),
@@ -796,3 +1047,11 @@ String _formatPeso(num amount) {
   }
   return buf.toString();
 }
+
+const List<String> _kPaymentMonthNames = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
+
+String _formatMonth(DateTime d) =>
+    '${_kPaymentMonthNames[d.month - 1]} ${d.year}';

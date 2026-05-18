@@ -9,16 +9,23 @@ class PaymentsResult<T> {
   bool get ok => error == null;
 }
 
+/// Ask the paymongo-create-payment-intent Edge Function for a PayMongo
+/// PaymentIntent. Pass [billingMonth] (YYYY-MM or YYYY-MM-DD) to charge a
+/// single month's rent (recurring); omit it for the move-in payment.
 Future<PaymentsResult<Map<String, dynamic>>> createPaymongoPaymentIntent(
-    String? contractId) async {
+  String? contractId, {
+  String? billingMonth,
+}) async {
   if (contractId == null || contractId.isEmpty) {
     return const PaymentsResult(error: 'Missing contractId');
   }
   try {
+    final body = <String, dynamic>{'contract_id': contractId};
+    if (billingMonth != null && billingMonth.isNotEmpty) {
+      body['billing_month'] = billingMonth;
+    }
     final res = await _sb.functions
-        .invoke('paymongo-create-payment-intent', body: {
-      'contract_id': contractId,
-    });
+        .invoke('paymongo-create-payment-intent', body: body);
     final data = res.data;
     if (data is Map && data['error'] != null) {
       return PaymentsResult(error: data['error'].toString());
@@ -26,6 +33,89 @@ Future<PaymentsResult<Map<String, dynamic>>> createPaymongoPaymentIntent(
     return PaymentsResult(data: Map<String, dynamic>.from(data as Map));
   } catch (e) {
     return PaymentsResult(error: e.toString());
+  }
+}
+
+/// Landlord-only: record a payment received outside the app (cash,
+/// direct GCash, manual bank transfer). Server gates on
+/// auth.uid() === contract.landlord_id and contract.status='paid'.
+Future<PaymentsResult<Map<String, dynamic>>> recordOfflinePayment({
+  required String contractId,
+  required num amountPhp,
+  required String methodType,
+  String? billingMonth,
+  DateTime? paidAt,
+  String? note,
+}) async {
+  if (contractId.isEmpty) return const PaymentsResult(error: 'Missing contractId');
+  if (amountPhp <= 0) return const PaymentsResult(error: 'amountPhp must be > 0');
+  if (methodType.isEmpty) return const PaymentsResult(error: 'Missing methodType');
+  try {
+    final body = <String, dynamic>{
+      'contract_id': contractId,
+      'amount_php': amountPhp,
+      'method_type': methodType,
+      'billing_month': billingMonth,
+      'paid_at': paidAt?.toIso8601String(),
+      'note': note,
+    };
+    final res = await _sb.functions
+        .invoke('landlord-record-offline-payment', body: body);
+    final data = res.data;
+    if (data is Map && data['error'] != null) {
+      return PaymentsResult(error: data['error'].toString());
+    }
+    return PaymentsResult(data: Map<String, dynamic>.from(data as Map));
+  } catch (e) {
+    return PaymentsResult(error: e.toString());
+  }
+}
+
+/// Landlord-only: generate a PayMongo Link for a tenant's monthly rent.
+/// Returns a hosted checkout URL the tenant can pay from any device.
+Future<PaymentsResult<Map<String, dynamic>>> createLandlordPaymentLink({
+  required String contractId,
+  required String billingMonth,
+  String? note,
+  DateTime? expiresAt,
+}) async {
+  if (contractId.isEmpty) return const PaymentsResult(error: 'Missing contractId');
+  if (billingMonth.isEmpty) return const PaymentsResult(error: 'Missing billingMonth');
+  try {
+    final body = <String, dynamic>{
+      'contract_id': contractId,
+      'billing_month': billingMonth,
+      'note': note,
+      'expires_at': expiresAt?.toIso8601String(),
+    };
+    final res = await _sb.functions
+        .invoke('paymongo-create-payment-link', body: body);
+    final data = res.data;
+    if (data is Map && data['error'] != null) {
+      return PaymentsResult(error: data['error'].toString());
+    }
+    return PaymentsResult(data: Map<String, dynamic>.from(data as Map));
+  } catch (e) {
+    return PaymentsResult(error: e.toString());
+  }
+}
+
+/// List the open/recent payment links a landlord has generated for a
+/// given contract. Both tenant and landlord can SELECT via RLS.
+Future<List<PaymentLinkRow>> fetchPaymentLinks(String contractId) async {
+  if (contractId.isEmpty) return const [];
+  try {
+    final rows = await _sb
+        .from('payment_links')
+        .select(
+            'id, billing_month, amount_cents, checkout_url, status, expires_at, created_at, note')
+        .eq('contract_id', contractId)
+        .order('created_at', ascending: false);
+    return (rows as List)
+        .map((r) => PaymentLinkRow.fromMap(Map<String, dynamic>.from(r)))
+        .toList();
+  } catch (_) {
+    return const [];
   }
 }
 
@@ -103,6 +193,9 @@ class PaymentTransactionRow {
   final String? last4;
   final String? failureReason;
   final String? listingTitle;
+  final String? recordedBy;
+  final String? note;
+  final DateTime? billingMonth;
 
   const PaymentTransactionRow({
     required this.id,
@@ -117,10 +210,14 @@ class PaymentTransactionRow {
     required this.last4,
     required this.failureReason,
     required this.listingTitle,
+    required this.recordedBy,
+    required this.note,
+    required this.billingMonth,
   });
 
   factory PaymentTransactionRow.fromMap(Map<String, dynamic> r) {
     final created = r['created_at'];
+    final billing = r['billing_month'];
     return PaymentTransactionRow(
       id: r['id'].toString(),
       amountCents: (r['amount_cents'] as num?)?.toInt() ?? 0,
@@ -134,8 +231,175 @@ class PaymentTransactionRow {
       last4: r['last4']?.toString(),
       failureReason: r['failure_reason']?.toString(),
       listingTitle: r['listing_title']?.toString(),
+      recordedBy: r['recorded_by']?.toString(),
+      note: r['note']?.toString(),
+      billingMonth: billing is String ? DateTime.tryParse(billing) : null,
     );
   }
+}
+
+/// Landlord-generated PayMongo Link row from `payment_links`.
+class PaymentLinkRow {
+  final String id;
+  final DateTime billingMonth;
+  final int amountCents;
+  final String checkoutUrl;
+  final String status;
+  final DateTime? expiresAt;
+  final DateTime? createdAt;
+  final String? note;
+
+  const PaymentLinkRow({
+    required this.id,
+    required this.billingMonth,
+    required this.amountCents,
+    required this.checkoutUrl,
+    required this.status,
+    required this.expiresAt,
+    required this.createdAt,
+    required this.note,
+  });
+
+  factory PaymentLinkRow.fromMap(Map<String, dynamic> r) {
+    DateTime? parse(dynamic v) =>
+        v is String ? DateTime.tryParse(v) : null;
+    return PaymentLinkRow(
+      id: r['id'].toString(),
+      billingMonth: parse(r['billing_month']) ?? DateTime.now(),
+      amountCents: (r['amount_cents'] as num?)?.toInt() ?? 0,
+      checkoutUrl: (r['checkout_url'] ?? '').toString(),
+      status: (r['status'] ?? 'pending').toString(),
+      expiresAt: parse(r['expires_at']),
+      createdAt: parse(r['created_at']),
+      note: r['note']?.toString(),
+    );
+  }
+}
+
+/// Phase B view row: per-contract rent due rollup.
+class ContractRentStatus {
+  final String contractId;
+  final DateTime? startDate;
+  final num? monthlyRent;
+  final DateTime? currentMonth;
+  final DateTime? lastPaidMonth;
+  final int monthsUnpaid;
+  final DateTime? nextDueMonth;
+
+  const ContractRentStatus({
+    required this.contractId,
+    required this.startDate,
+    required this.monthlyRent,
+    required this.currentMonth,
+    required this.lastPaidMonth,
+    required this.monthsUnpaid,
+    required this.nextDueMonth,
+  });
+
+  factory ContractRentStatus.fromMap(Map<String, dynamic> r) {
+    DateTime? parse(dynamic v) =>
+        v is String ? DateTime.tryParse(v) : null;
+    return ContractRentStatus(
+      contractId: r['contract_id'].toString(),
+      startDate: parse(r['start_date']),
+      monthlyRent: r['monthly_rent'] as num?,
+      currentMonth: parse(r['current_month']),
+      lastPaidMonth: parse(r['last_paid_month']),
+      monthsUnpaid: (r['months_unpaid'] as num?)?.toInt() ?? 0,
+      nextDueMonth: parse(r['next_due_month']),
+    );
+  }
+}
+
+/// Per-month rent entry expanded from contract_rent_status + payment rows.
+class RentMonth {
+  final DateTime billingMonth;
+  final int amountCents;
+  final bool paid;
+  final DateTime? paidAt;
+  final String? paymongoPaymentIntentId;
+  final String? method;
+
+  const RentMonth({
+    required this.billingMonth,
+    required this.amountCents,
+    required this.paid,
+    required this.paidAt,
+    required this.paymongoPaymentIntentId,
+    required this.method,
+  });
+}
+
+/// Read the contract_rent_status view for a single contract.
+Future<ContractRentStatus?> fetchContractRentStatus(String contractId) async {
+  if (contractId.isEmpty) return null;
+  try {
+    final row = await _sb
+        .from('contract_rent_status')
+        .select('*')
+        .eq('contract_id', contractId)
+        .maybeSingle();
+    if (row == null) return null;
+    return ContractRentStatus.fromMap(Map<String, dynamic>.from(row));
+  } catch (_) {
+    return null;
+  }
+}
+
+/// Expand a contract_rent_status row into a per-month list from
+/// start_date → current month, each tagged with paid/unpaid + the
+/// relevant payment row. Mirrors the web `fetchRentMonths` walker.
+Future<List<RentMonth>> fetchRentMonths(String contractId) async {
+  if (contractId.isEmpty) return const [];
+  final status = await fetchContractRentStatus(contractId);
+  if (status?.startDate == null) return const [];
+
+  List<dynamic> paid;
+  try {
+    paid = await _sb
+        .from('payment')
+        .select(
+            'billing_month, amount_cents, paid_at, paymongo_payment_intent_id, method')
+        .eq('contract_id', contractId)
+        .eq('status', 'succeeded')
+        .not('billing_month', 'is', null)
+        .order('billing_month', ascending: true);
+  } catch (_) {
+    paid = const [];
+  }
+
+  final paidMap = <String, Map<String, dynamic>>{};
+  for (final p in paid) {
+    final bm = (p as Map)['billing_month']?.toString();
+    if (bm == null) continue;
+    paidMap[bm.substring(0, 10)] = Map<String, dynamic>.from(p);
+  }
+
+  final rentCents = (status!.monthlyRent ?? 0).toDouble().round() * 100;
+  final months = <RentMonth>[];
+  final start = DateTime(status.startDate!.year, status.startDate!.month, 1);
+  final today = DateTime.now();
+  final end = DateTime(today.year, today.month, 1);
+  DateTime cursor = start;
+  while (!cursor.isAfter(end)) {
+    final key =
+        '${cursor.year.toString().padLeft(4, '0')}-${cursor.month.toString().padLeft(2, '0')}-01';
+    final hit = paidMap[key];
+    months.add(RentMonth(
+      billingMonth: cursor,
+      amountCents:
+          ((hit?['amount_cents'] as num?)?.toInt()) ?? rentCents,
+      paid: hit != null,
+      paidAt: hit?['paid_at'] is String
+          ? DateTime.tryParse(hit!['paid_at'] as String)
+          : null,
+      paymongoPaymentIntentId:
+          hit?['paymongo_payment_intent_id']?.toString(),
+      method: hit?['method']?.toString(),
+    ));
+    cursor = DateTime(cursor.year, cursor.month + 1, 1);
+  }
+  return months;
 }
 
 Future<List<PaymentTransactionRow>> fetchMyPaymentsWithContext({

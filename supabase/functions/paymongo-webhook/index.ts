@@ -47,6 +47,12 @@ async function applySucceeded(payment: any) {
   const contractId = attrs.metadata?.contract_id;
   if (!contractId) return;
 
+  // billing_month set => recurring rent (skip status flip); null => move-in.
+  const billingMonth = typeof attrs.metadata?.billing_month === "string"
+    ? attrs.metadata.billing_month
+    : null;
+  const isMonthly = !!billingMonth;
+
   const source     = payment.attributes?.source ?? {};
   const sourceType = source.type ?? attrs.payment_method_allowed?.[0] ?? "card";
   const billingName = payment.attributes?.billing?.name ?? null;
@@ -69,9 +75,14 @@ async function applySucceeded(payment: any) {
     return;
   }
 
+  // Mirror the PayMongo PI id into the legacy stripe_payment_intent_id
+  // column so its original NOT NULL is satisfied on first-time inserts
+  // (when the webhook beats the foreground record-payment call). The
+  // mock payment function uses the same pattern.
   await admin.from("payment").upsert(
     {
       contract_id:                contractId,
+      stripe_payment_intent_id:   piId,
       paymongo_payment_intent_id: piId,
       amount_cents:               attrs.amount,
       currency:                   (attrs.currency ?? "php").toLowerCase(),
@@ -80,6 +91,7 @@ async function applySucceeded(payment: any) {
       method:                     brand,
       last4,
       name:                       billingName,
+      billing_month:              billingMonth,
     },
     { onConflict: "paymongo_payment_intent_id" },
   );
@@ -97,27 +109,32 @@ async function applySucceeded(payment: any) {
       brand,
       last4,
       billing_name:               billingName,
+      billing_month:              billingMonth,
       raw_response:               pi,
       updated_at:                 new Date().toISOString(),
     },
     { onConflict: "paymongo_payment_intent_id" },
   );
 
-  await admin
-    .from("contract")
-    .update({ status: "paid", updated_at: new Date().toISOString() })
-    .eq("id", contractId);
-
-  const { data: contractMeta } = await admin
-    .from("contract")
-    .select("listing_id")
-    .eq("id", contractId)
-    .maybeSingle();
-  if (contractMeta?.listing_id) {
+  // Move-in only: flip contract → paid and listing → rented. Monthly
+  // rent payments don't change either (tenancy is already active).
+  if (!isMonthly) {
     await admin
-      .from("listings")
-      .update({ status: "rented", updated_at: new Date().toISOString() })
-      .eq("id", contractMeta.listing_id);
+      .from("contract")
+      .update({ status: "paid", updated_at: new Date().toISOString() })
+      .eq("id", contractId);
+
+    const { data: contractMeta } = await admin
+      .from("contract")
+      .select("listing_id")
+      .eq("id", contractId)
+      .maybeSingle();
+    if (contractMeta?.listing_id) {
+      await admin
+        .from("listings")
+        .update({ status: "rented", updated_at: new Date().toISOString() })
+        .eq("id", contractMeta.listing_id);
+    }
   }
 }
 
@@ -162,7 +179,118 @@ async function applyRefunded(payment: any) {
     .eq("paymongo_payment_intent_id", piId);
 }
 
-serve(async (req) => {
+// Landlord-initiated payment link was paid by the tenant. The event
+// payload is the Link object (NOT a PaymentIntent), so we look up our
+// payment_links row to recover the contract + billing_month context,
+// then write payment + payment_transactions rows the same way as a
+// normal rent payment. The link itself is marked 'paid'.
+async function applyLinkPaid(link: any) {
+  const linkId = link?.id as string | undefined;
+  if (!linkId) return;
+
+  // Find the matching payment_links row (created by paymongo-create-payment-link).
+  const { data: linkRow } = await admin
+    .from("payment_links")
+    .select("id, contract_id, landlord_id, billing_month, amount_cents, status")
+    .eq("paymongo_link_id", linkId)
+    .maybeSingle();
+  if (!linkRow) {
+    // Unknown link — nothing to do. Don't 500; this can happen if the
+    // landlord created a link manually in the PayMongo dashboard.
+    return;
+  }
+  if (linkRow.status === "paid") return;
+
+  // Find the actual payment record nested under the link payload.
+  const linkPayments = Array.isArray(link?.attributes?.payments) ? link.attributes.payments : [];
+  const firstPayment = linkPayments[0];
+  const paymentAttrs = firstPayment?.attributes ?? {};
+  const paymongoPaymentId = firstPayment?.id ?? null;
+  const source     = paymentAttrs.source ?? {};
+  const sourceType = source.type ?? "card";
+  const billingName = paymentAttrs.billing?.name ?? null;
+  const brand      = sourceType === "card" ? (source.brand ?? null) : sourceType;
+  const last4      = sourceType === "card" ? (source.last4 ?? null) : null;
+  const paidAt     = paymentAttrs.paid_at
+    ? new Date(paymentAttrs.paid_at * 1000).toISOString()
+    : new Date().toISOString();
+  // No PaymentIntent for Links — use the link id as the dedup key.
+  const dedupId = `link_${linkId}`;
+  const amountCents = Number(paymentAttrs.amount ?? linkRow.amount_cents);
+  const currency    = String(paymentAttrs.currency ?? "php").toLowerCase();
+  const nowIso      = new Date().toISOString();
+
+  // Look up tenant_id for user_id on the ledger row — link belongs to
+  // contract, ledger row belongs to tenant.
+  const { data: contractMeta } = await admin
+    .from("contract")
+    .select("tenant_id, listing_id")
+    .eq("id", linkRow.contract_id)
+    .maybeSingle();
+
+  // Idempotent: skip if we already recorded this link's payment.
+  const { data: existingTx } = await admin
+    .from("payment_transactions")
+    .select("id")
+    .eq("paymongo_payment_intent_id", dedupId)
+    .maybeSingle();
+
+  let ledgerId = existingTx?.id ?? null;
+  if (!existingTx) {
+    const { data: insTx, error: insTxErr } = await admin
+      .from("payment_transactions")
+      .insert({
+        contract_id:                linkRow.contract_id,
+        user_id:                    contractMeta?.tenant_id,
+        paymongo_payment_intent_id: dedupId,
+        paymongo_payment_id:        paymongoPaymentId,
+        amount_cents:               amountCents,
+        currency,
+        status:                     "succeeded",
+        method_type:                sourceType,
+        brand,
+        last4,
+        billing_name:               billingName,
+        billing_month:              linkRow.billing_month,
+        raw_response:               link,
+        updated_at:                 nowIso,
+      })
+      .select("id")
+      .maybeSingle();
+    if (insTxErr) return; // bail silently; PayMongo will retry the webhook
+    ledgerId = insTx?.id ?? null;
+  }
+
+  // Upsert into payment for parity with the regular flow.
+  await admin.from("payment").upsert(
+    {
+      contract_id:                linkRow.contract_id,
+      stripe_payment_intent_id:   dedupId,
+      paymongo_payment_intent_id: dedupId,
+      amount_cents:               amountCents,
+      currency,
+      status:                     "succeeded",
+      paid_at:                    paidAt,
+      method:                     brand,
+      last4,
+      name:                       billingName,
+      payment_transaction_id:     ledgerId,
+      billing_month:              linkRow.billing_month,
+    },
+    { onConflict: "paymongo_payment_intent_id" },
+  );
+
+  await admin
+    .from("payment_links")
+    .update({
+      status:              "paid",
+      paid_transaction_id: ledgerId,
+      updated_at:          nowIso,
+    })
+    .eq("id", linkRow.id);
+}
+
+serve(async (req: Request) => {
   if (req.method !== "POST") return new Response("Method not allowed", { status: 405 });
 
   const raw = await req.text();
@@ -185,9 +313,10 @@ serve(async (req) => {
     const payload = event?.data?.attributes?.data;
     if (!type || !payload) return new Response("ok (no event)", { status: 200 });
 
-    if (type === "payment.paid")      await applySucceeded(payload);
-    if (type === "payment.failed")    await applyFailed(payload);
-    if (type === "payment.refunded")  await applyRefunded(payload);
+    if (type === "payment.paid")       await applySucceeded(payload);
+    if (type === "payment.failed")     await applyFailed(payload);
+    if (type === "payment.refunded")   await applyRefunded(payload);
+    if (type === "link.payment.paid")  await applyLinkPaid(payload);
 
     return new Response(JSON.stringify({ received: true }), {
       status: 200,

@@ -80,6 +80,14 @@ serve(async (req) => {
     const brand = sourceType === "card" ? (source.brand ?? null) : sourceType;
     const last4 = sourceType === "card" ? (source.last4 ?? null) : null;
 
+    // billing_month is non-null for recurring monthly rent PIs. When set,
+    // we DO NOT flip contract.status (tenancy is already 'paid') and we
+    // skip the listing-hiding side-effect for the same reason.
+    const billingMonth = typeof attrs.metadata?.billing_month === "string"
+      ? attrs.metadata.billing_month
+      : null;
+    const isMonthly = !!billingMonth;
+
     // Find the ledger row created at PI creation time (or the most
     // recent one for this PI) so we can link payment.payment_transaction_id.
     const { data: ledgerRow } = await admin
@@ -92,11 +100,16 @@ serve(async (req) => {
     const paidAt = attrs.last_payment_error?.created_at ??
       (firstPayment.paid_at ? new Date(firstPayment.paid_at * 1000).toISOString() : nowIso);
 
+    // Mirror the PayMongo PI id into the legacy stripe_payment_intent_id
+    // column so the original NOT NULL on that column is satisfied and the
+    // Flutter app (which still reads the legacy column) keeps seeing a value.
+    // Matches the pattern in paymongo-record-mock-payment/index.ts.
     const { error: payErr } = await admin
       .from("payment")
       .upsert(
         {
           contract_id,
+          stripe_payment_intent_id:   pi.id,
           paymongo_payment_intent_id: pi.id,
           amount_cents:               attrs.amount,
           currency:                   (attrs.currency ?? "php").toLowerCase(),
@@ -106,6 +119,7 @@ serve(async (req) => {
           last4,
           name:                       billingName,
           payment_transaction_id:     ledgerRow?.id ?? null,
+          billing_month:              billingMonth,
         },
         { onConflict: "paymongo_payment_intent_id" },
       );
@@ -127,6 +141,7 @@ serve(async (req) => {
           brand,
           last4,
           billing_name:               billingName,
+          billing_month:              billingMonth,
           raw_response:               pi,
           updated_at:                 nowIso,
         },
@@ -134,26 +149,30 @@ serve(async (req) => {
       );
     if (ledgerErr) return json({ error: ledgerErr.message }, 500);
 
-    const { error: cErr } = await admin
-      .from("contract")
-      .update({ status: "paid", updated_at: nowIso })
-      .eq("id", contract_id);
-    if (cErr) return json({ error: cErr.message }, 500);
+    // Move-in only: flip contract → paid and listing → rented. Monthly
+    // rent payments don't change either (tenancy is already active).
+    if (!isMonthly) {
+      const { error: cErr } = await admin
+        .from("contract")
+        .update({ status: "paid", updated_at: nowIso })
+        .eq("id", contract_id);
+      if (cErr) return json({ error: cErr.message }, 500);
 
-    // Hide the listing from public browse and block new applies.
-    const { data: contractMeta } = await admin
-      .from("contract")
-      .select("listing_id")
-      .eq("id", contract_id)
-      .maybeSingle();
-    if (contractMeta?.listing_id) {
-      await admin
-        .from("listings")
-        .update({ status: "rented", updated_at: nowIso })
-        .eq("id", contractMeta.listing_id);
+      // Hide the listing from public browse and block new applies.
+      const { data: contractMeta } = await admin
+        .from("contract")
+        .select("listing_id")
+        .eq("id", contract_id)
+        .maybeSingle();
+      if (contractMeta?.listing_id) {
+        await admin
+          .from("listings")
+          .update({ status: "rented", updated_at: nowIso })
+          .eq("id", contractMeta.listing_id);
+      }
     }
 
-    return json({ ok: true });
+    return json({ ok: true, billingMonth });
   } catch (err) {
     return json({ error: (err as Error).message ?? String(err) }, 500);
   }

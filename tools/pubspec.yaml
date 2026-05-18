@@ -1,0 +1,11 @@
+name: vxr_test_tools
+description: Cross-platform test probes for the ViewXRent integration suite.
+publish_to: 'none'
+version: 0.1.0
+
+environment:
+  sdk: ^3.11.0
+
+dependencies:
+  supabase: ^2.4.0
+  args: ^2.5.0
